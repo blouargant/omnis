@@ -1,9 +1,22 @@
 package collectionctx
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// writeLegacyMemory writes the pre-collmem memory.md beside the instructions.
+func writeLegacyMemory(t *testing.T, name, text string) {
+	t.Helper()
+	if err := os.MkdirAll(Dir(name), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(Dir(name), "memory.md"), []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestResolveEmptyWhenNoProse(t *testing.T) {
 	t.Setenv("OMNIS_HOME", t.TempDir())
@@ -20,9 +33,7 @@ func TestWriteReadResolve(t *testing.T) {
 	if err := WriteInstructions("Client X", "Use a formal tone."); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteMemory("Client X", "Client is on GCP."); err != nil {
-		t.Fatal(err)
-	}
+	writeLegacyMemory(t, "Client X", "Client is on GCP.")
 	if got := ReadInstructions("Client X"); got != "Use a formal tone." {
 		t.Fatalf("instructions: %q", got)
 	}
@@ -44,9 +55,7 @@ func TestWriteReadResolve(t *testing.T) {
 // a block nor a "has context" badge.
 func TestMemoryOnlyIsNotContext(t *testing.T) {
 	t.Setenv("OMNIS_HOME", t.TempDir())
-	if err := WriteMemory("M", "Some notes."); err != nil {
-		t.Fatal(err)
-	}
+	writeLegacyMemory(t, "M", "Some notes.")
 	if got := Resolve("M"); got != "" {
 		t.Fatalf("memory-only collection should resolve empty, got %q", got)
 	}

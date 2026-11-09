@@ -91,16 +91,6 @@ func UpdateCollectionProfile(name string, mutate func(p *CollectionProfileData))
 	return sharedCollections().UpdateCollectionProfile(name, mutate)
 }
 
-// SetCollectionProfileData writes a shared-root collection's full scalar bag.
-func SetCollectionProfileData(name string, d CollectionProfileData) error {
-	return sharedCollections().SetCollectionProfileData(name, d)
-}
-
-// SetCollectionMemoryUpdate sets a shared-root collection's auto-update stamp.
-func SetCollectionMemoryUpdate(name string, ts int64) error {
-	return sharedCollections().SetCollectionMemoryUpdate(name, ts)
-}
-
 // collectionsFile is the on-disk shape of collections.json: an ordered list of
 // user-created collection names, plus an optional per-collection colour map
 // (keyed by the canonical stored name). General is virtual and never appears
@@ -111,9 +101,10 @@ type collectionsFile struct {
 	Collections []string          `json:"collections"`
 	Colors      map[string]string `json:"colors,omitempty"`
 	// Profiles carries per-collection scalar defaults seeded onto new chats
-	// filed under the collection (keyed by the canonical stored name). The prose
-	// (instructions/memory) lives in per-collection files under internal/collectionctx;
-	// only these small scalars live in this atomic single-file.
+	// filed under the collection (keyed by the canonical stored name). The
+	// instructions live in per-collection files under internal/collectionctx and
+	// the memories under internal/collmem; only these small scalars live in this
+	// atomic single-file.
 	Profiles map[string]collectionProfile `json:"profiles,omitempty"`
 }
 
@@ -122,29 +113,19 @@ type collectionsFile struct {
 // routing still runs and the squad can hand back to the router); Cwd is the
 // directory a new chat starts in. Both empty ⇒ the collection carries no
 // defaults and new chats behave exactly as before.
+//
+// Files written by older builds may also carry memory_size / auto_update /
+// last_memory_update (the removed Memory text's size and auto-update worker):
+// JSON decoding ignores them and the next write drops them.
 type collectionProfile struct {
 	Squad string `json:"squad,omitempty"`
 	Cwd   string `json:"cwd,omitempty"`
-	// MemorySize bounds the distilled/injected memory ("" | "small" | "medium" |
-	// "large"; "" ⇒ medium). It is a soft target: it caps the distiller and drives
-	// the editor word-counter, but never truncates manually typed memory.
-	MemorySize string `json:"memory_size,omitempty"`
-	// AutoUpdate turns on the server-side idle memory distiller for this
-	// collection (opt-in, default off).
-	AutoUpdate bool `json:"auto_update,omitempty"`
-	// LastMemoryUpdate is the unix-seconds time of the last AUTOMATIC memory
-	// commit; 0 ⇒ none. Drives the min-interval gate and the "auto-updated N ago"
-	// marker; cleared on revert or a manual memory save.
-	LastMemoryUpdate int64 `json:"last_memory_update,omitempty"`
 }
 
 // CollectionProfileData is a collection's full per-collection scalar bag.
 type CollectionProfileData struct {
-	Squad            string
-	Cwd              string
-	MemorySize       string
-	AutoUpdate       bool
-	LastMemoryUpdate int64
+	Squad string
+	Cwd   string
 }
 
 // CollectionProfileFull returns the full stored per-collection scalars. A missing
@@ -161,18 +142,14 @@ func (c *Collections) CollectionProfileFull(name string) CollectionProfileData {
 		return CollectionProfileData{}
 	}
 	p := f.Profiles[f.Collections[i]]
-	return CollectionProfileData{
-		Squad: p.Squad, Cwd: p.Cwd, MemorySize: p.MemorySize,
-		AutoUpdate: p.AutoUpdate, LastMemoryUpdate: p.LastMemoryUpdate,
-	}
+	return CollectionProfileData{Squad: p.Squad, Cwd: p.Cwd}
 }
 
 // UpdateCollectionProfile applies mutate to a collection's scalar profile under a
 // SINGLE held lock (atomic read-modify-write) and persists the result. All-zero
 // after mutation drops the entry. An unknown collection is an error. This is the
 // race-safe way to change one field without clobbering a concurrent writer's
-// change to another (e.g. the PATCH route changing memory_size while the
-// background auto-updater sets last_memory_update).
+// change to another.
 func (c *Collections) UpdateCollectionProfile(name string, mutate func(p *CollectionProfileData)) error {
 	name = strings.TrimSpace(name)
 	collectionsMu.Lock()
@@ -187,52 +164,11 @@ func (c *Collections) UpdateCollectionProfile(name string, mutate func(p *Collec
 	}
 	canon := f.Collections[i]
 	cur := f.Profiles[canon]
-	d := CollectionProfileData{
-		Squad: cur.Squad, Cwd: cur.Cwd, MemorySize: cur.MemorySize,
-		AutoUpdate: cur.AutoUpdate, LastMemoryUpdate: cur.LastMemoryUpdate,
-	}
+	d := CollectionProfileData{Squad: cur.Squad, Cwd: cur.Cwd}
 	mutate(&d)
 	p := collectionProfile{
-		Squad:            strings.TrimSpace(d.Squad),
-		Cwd:              strings.TrimSpace(d.Cwd),
-		MemorySize:       strings.TrimSpace(d.MemorySize),
-		AutoUpdate:       d.AutoUpdate,
-		LastMemoryUpdate: d.LastMemoryUpdate,
-	}
-	if p == (collectionProfile{}) {
-		if f.Profiles != nil {
-			delete(f.Profiles, canon)
-		}
-	} else {
-		if f.Profiles == nil {
-			f.Profiles = map[string]collectionProfile{}
-		}
-		f.Profiles[canon] = p
-	}
-	return c.saveFileLocked(f)
-}
-
-// SetCollectionProfileData writes a collection's full scalar bag (all zero ⇒ the
-// profile entry is dropped). An unknown collection is an error.
-func (c *Collections) SetCollectionProfileData(name string, d CollectionProfileData) error {
-	name = strings.TrimSpace(name)
-	collectionsMu.Lock()
-	defer collectionsMu.Unlock()
-	f, err := c.loadFileLocked()
-	if err != nil {
-		return err
-	}
-	i := indexOfFold(f.Collections, name)
-	if i < 0 {
-		return fmt.Errorf("collection %q not found", name)
-	}
-	canon := f.Collections[i]
-	p := collectionProfile{
-		Squad:            strings.TrimSpace(d.Squad),
-		Cwd:              strings.TrimSpace(d.Cwd),
-		MemorySize:       strings.TrimSpace(d.MemorySize),
-		AutoUpdate:       d.AutoUpdate,
-		LastMemoryUpdate: d.LastMemoryUpdate,
+		Squad: strings.TrimSpace(d.Squad),
+		Cwd:   strings.TrimSpace(d.Cwd),
 	}
 	if p == (collectionProfile{}) {
 		if f.Profiles != nil {
@@ -254,30 +190,13 @@ func (c *Collections) CollectionProfile(name string) (squad, cwd string) {
 	return p.Squad, p.Cwd
 }
 
-// SetCollectionProfile sets squad/cwd while PRESERVING memory_size/auto_update/
-// last_memory_update (a squad/cwd-only PATCH must not clobber the memory fields).
+// SetCollectionProfile sets a collection's squad and cwd (both empty ⇒ the
+// profile entry is dropped).
 func (c *Collections) SetCollectionProfile(name, squad, cwd string) error {
 	return c.UpdateCollectionProfile(name, func(p *CollectionProfileData) {
 		p.Squad = squad
 		p.Cwd = cwd
 	})
-}
-
-// SetCollectionMemoryUpdate updates only the last-automatic-memory-commit
-// timestamp (0 clears it), preserving the other scalars.
-func (c *Collections) SetCollectionMemoryUpdate(name string, ts int64) error {
-	return c.UpdateCollectionProfile(name, func(p *CollectionProfileData) {
-		p.LastMemoryUpdate = ts
-	})
-}
-
-// ValidMemorySize reports whether s is an accepted memory-size token.
-func ValidMemorySize(s string) bool {
-	switch strings.TrimSpace(s) {
-	case "", "small", "medium", "large":
-		return true
-	}
-	return false
 }
 
 // MaxCollectionColorLen bounds a colour token so it stays a small palette key.
@@ -368,13 +287,14 @@ func pruneColorsLocked(f *collectionsFile) {
 
 // pruneProfilesLocked drops profile entries whose collection no longer exists,
 // mirroring pruneColorsLocked so a deleted/renamed collection leaves no orphaned
-// profile behind.
+// profile behind, and empty entries (e.g. a legacy profile that held only the
+// removed memory scalars).
 func pruneProfilesLocked(f *collectionsFile) {
 	if len(f.Profiles) == 0 {
 		return
 	}
 	for key := range f.Profiles {
-		if indexOfFold(f.Collections, key) < 0 {
+		if indexOfFold(f.Collections, key) < 0 || f.Profiles[key] == (collectionProfile{}) {
 			delete(f.Profiles, key)
 		}
 	}

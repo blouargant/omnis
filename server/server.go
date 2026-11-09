@@ -793,8 +793,6 @@ func newEngine(d serverDeps) *gin.Engine {
 	auth.GET("/collections/:name/memories", handleListMemories(d))
 	auth.PUT("/collections/:name/memories/:mem", handlePutMemory(d))
 	auth.DELETE("/collections/:name/memories/:mem", handleDeleteMemory(d))
-	auth.POST("/collections/:name/memory/distill", handleDistillCollectionMemory(d))
-	auth.POST("/collections/:name/memory/revert", handleRevertCollectionMemory(d))
 	auth.POST("/sessions/:id/collection", handleMoveSession(d))
 	auth.GET("/sessions/:id/skills", handleSessionSkills(d))
 	auth.GET("/sessions/:id/produced", handleSessionProduced(d))

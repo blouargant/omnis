@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/blouargant/omnis/internal/collmem"
 	"github.com/blouargant/omnis/internal/sessions"
 	"github.com/gin-gonic/gin"
 )
@@ -24,12 +25,15 @@ type collectionInfo struct {
 	// pin it on top and hide its rename/delete affordances.
 	General bool `json:"general,omitempty"`
 	// Squad / Cwd are the collection's per-session defaults seeded onto new chats
-	// (empty when unset). HasContext reports whether the collection has any
-	// instructions/memory prose, so the UI can badge configured collections
-	// without shipping the full text.
+	// (empty when unset). HasContext reports whether the collection has
+	// instructions, so the UI can badge configured collections without shipping
+	// the full text.
 	Squad      string `json:"squad,omitempty"`
 	Cwd        string `json:"cwd,omitempty"`
 	HasContext bool   `json:"has_context,omitempty"`
+	// Memories is the number of memories saved for the collection (General
+	// included), from internal/collmem.
+	Memories int `json:"memories"`
 }
 
 // collectionCounts tallies non-hidden sessions by their effective collection.
@@ -74,6 +78,7 @@ func handleListCollections(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cols := collectionsFor(c)
 		store := ctxStoreFor(requestLogin(c))
+		mems := collmem.In(userRoot(requestLogin(c)))
 		known, err := cols.ListCollections()
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -87,10 +92,11 @@ func handleListCollections(d serverDeps) gin.HandlerFunc {
 		counts, active := collectionCounts(d, requestLogin(c), known)
 		out := make([]collectionInfo, 0, len(known)+1)
 		out = append(out, collectionInfo{
-			Name:    sessions.GeneralCollection,
-			Count:   counts[sessions.GeneralCollection],
-			Active:  active[sessions.GeneralCollection],
-			General: true,
+			Name:     sessions.GeneralCollection,
+			Count:    counts[sessions.GeneralCollection],
+			Active:   active[sessions.GeneralCollection],
+			General:  true,
+			Memories: len(mems.List("")),
 		})
 		for _, n := range known {
 			squad, cwd := cols.CollectionProfile(n)
@@ -102,6 +108,7 @@ func handleListCollections(d serverDeps) gin.HandlerFunc {
 				Squad:      squad,
 				Cwd:        cwd,
 				HasContext: store.HasContext(n),
+				Memories:   len(mems.List(n)),
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{"collections": out})
@@ -155,13 +162,13 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "the General collection cannot be modified"})
 			return
 		}
+		// Unknown keys (memory_size / auto_update from an older client) are
+		// ignored by the JSON binding.
 		var body struct {
-			Name       string  `json:"name"`
-			Color      *string `json:"color"`
-			Squad      *string `json:"squad"`
-			Cwd        *string `json:"cwd"`
-			MemorySize *string `json:"memory_size"`
-			AutoUpdate *bool   `json:"auto_update"`
+			Name  string  `json:"name"`
+			Color *string `json:"color"`
+			Squad *string `json:"squad"`
+			Cwd   *string `json:"cwd"`
 		}
 		_ = c.ShouldBindJSON(&body)
 		cols := collectionsFor(c)
@@ -200,12 +207,11 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 			}
 		}
 
-		// Per-collection scalars (squad / cwd / memory_size / auto_update). Validate
-		// the incoming values, then apply them ATOMICALLY via UpdateCollectionProfile
-		// (single locked read-modify-write) so a field edit here never clobbers the
-		// background auto-updater's concurrent last_memory_update write. Only fields
-		// present in the body change; an empty string clears that field.
-		if body.Squad != nil || body.Cwd != nil || body.MemorySize != nil || body.AutoUpdate != nil {
+		// Per-collection scalars (squad / cwd). Validate the incoming values, then
+		// apply them atomically via UpdateCollectionProfile (single locked
+		// read-modify-write). Only fields present in the body change; an empty
+		// string clears that field.
+		if body.Squad != nil || body.Cwd != nil {
 			cur := cols.CollectionProfileFull(current)
 			sq, cw := cur.Squad, cur.Cwd
 			if body.Squad != nil {
@@ -213,10 +219,6 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 			}
 			if body.Cwd != nil {
 				cw = strings.TrimSpace(*body.Cwd)
-			}
-			if body.MemorySize != nil && !sessions.ValidMemorySize(strings.TrimSpace(*body.MemorySize)) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid memory size"})
-				return
 			}
 			if sq != "" && d.Manager != nil && !d.Manager.HasSquad(strings.ToLower(sq)) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "unknown squad " + sq})
@@ -234,12 +236,6 @@ func handleUpdateCollection(d serverDeps) gin.HandlerFunc {
 				}
 				if body.Cwd != nil {
 					p.Cwd = cw
-				}
-				if body.MemorySize != nil {
-					p.MemorySize = strings.TrimSpace(*body.MemorySize)
-				}
-				if body.AutoUpdate != nil {
-					p.AutoUpdate = *body.AutoUpdate
 				}
 			}); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -313,9 +309,10 @@ func resolveKnownCollection(c *gin.Context) (string, bool) {
 }
 
 // handleGetCollectionContext returns a full editor snapshot for one collection:
-// its instructions + memory prose plus its per-session defaults (squad, cwd,
-// color). Writes are split — prose via PUT …/context, scalars via PATCH — but a
-// single GET hands the editor everything it needs.
+// its instructions plus its per-session defaults (squad, cwd, color). Writes are
+// split — instructions via PUT …/context, scalars via PATCH — but a single GET
+// hands the editor everything it needs. The collection's memories have their own
+// routes (…/memories).
 func handleGetCollectionContext(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		name, ok := resolveKnownCollection(c)
@@ -324,26 +321,21 @@ func handleGetCollectionContext(d serverDeps) gin.HandlerFunc {
 		}
 		cols := collectionsFor(c)
 		store := ctxStoreFor(requestLogin(c))
-		prof := cols.CollectionProfileFull(name)
+		squad, cwd := cols.CollectionProfile(name)
 		colors, _ := cols.CollectionColors()
 		c.JSON(http.StatusOK, gin.H{
-			"name":               name,
-			"instructions":       store.ReadInstructions(name),
-			"memory":             store.ReadMemory(name),
-			"squad":              prof.Squad,
-			"cwd":                prof.Cwd,
-			"color":              colors[name],
-			"memory_size":        prof.MemorySize,
-			"auto_update":        prof.AutoUpdate,
-			"last_memory_update": prof.LastMemoryUpdate,
-			"has_prev_memory":    store.HasPrevMemory(name),
+			"name":         name,
+			"instructions": store.ReadInstructions(name),
+			"squad":        squad,
+			"cwd":          cwd,
+			"color":        colors[name],
 		})
 	}
 }
 
-// handleSetCollectionContext replaces a collection's prose. Both fields are
-// optional: send `instructions` and/or `memory` to overwrite that file (an empty
-// string removes it). Per-session defaults (squad/cwd) go through PATCH, not here.
+// handleSetCollectionContext replaces a collection's instructions (an empty
+// string removes the file). Unknown keys — an older client's `memory` — are
+// ignored. Per-session defaults (squad/cwd) go through PATCH, not here.
 func handleSetCollectionContext(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		name, ok := resolveKnownCollection(c)
@@ -352,7 +344,6 @@ func handleSetCollectionContext(d serverDeps) gin.HandlerFunc {
 		}
 		var body struct {
 			Instructions *string `json:"instructions"`
-			Memory       *string `json:"memory"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
@@ -365,16 +356,6 @@ func handleSetCollectionContext(d serverDeps) gin.HandlerFunc {
 				return
 			}
 		}
-		if body.Memory != nil {
-			if err := store.WriteMemory(name, *body.Memory); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			// A manual memory edit supersedes any unreviewed auto-commit: consume
-			// the revert snapshot + clear the auto-update marker.
-			_ = store.RemovePrevMemory(name)
-			_ = collectionsFor(c).SetCollectionMemoryUpdate(name, 0)
-		}
 		if d.PushEvents != nil {
 			d.PushEvents.broadcastOwned("collections_changed", "", requestLogin(c))
 		}
@@ -382,36 +363,7 @@ func handleSetCollectionContext(d serverDeps) gin.HandlerFunc {
 			"name":         name,
 			"has_context":  store.HasContext(name),
 			"instructions": store.ReadInstructions(name),
-			"memory":       store.ReadMemory(name),
 		})
-	}
-}
-
-// handleRevertCollectionMemory restores a collection's previous-memory snapshot
-// (written by an auto-commit) and consumes it — undoing the last automatic
-// memory update. 404 when there is no snapshot to restore.
-func handleRevertCollectionMemory(d serverDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		name, ok := resolveKnownCollection(c)
-		if !ok {
-			return
-		}
-		store := ctxStoreFor(requestLogin(c))
-		prev := store.ReadPrevMemory(name)
-		if strings.TrimSpace(prev) == "" {
-			c.JSON(http.StatusNotFound, gin.H{"error": "no previous memory to revert to"})
-			return
-		}
-		if err := store.WriteMemory(name, prev); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		_ = store.RemovePrevMemory(name)
-		_ = collectionsFor(c).SetCollectionMemoryUpdate(name, 0)
-		if d.PushEvents != nil {
-			d.PushEvents.broadcastOwned("collections_changed", "", requestLogin(c))
-		}
-		c.JSON(http.StatusOK, gin.H{"name": name, "memory": store.ReadMemory(name)})
 	}
 }
 

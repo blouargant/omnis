@@ -1,6 +1,9 @@
 package sessions
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -205,5 +208,42 @@ func TestSetConversationCollectionPersists(t *testing.T) {
 	metas := LoadPersistedSessions()
 	if len(metas) != 1 || metas[0].Collection != "Work" {
 		t.Fatalf("persisted meta collection: %+v", metas)
+	}
+}
+
+// TestLegacyProfileKeysAreIgnoredAndDropped pins the removal of the collection
+// Memory text: a collections.json written by an older build still carries
+// memory_size / auto_update / last_memory_update in a profile. It must load
+// (squad kept) and the three keys must disappear on the next write.
+func TestLegacyProfileKeysAreIgnoredAndDropped(t *testing.T) {
+	root := t.TempDir()
+	legacy := `{"collections":["Proxy","Old"],"profiles":{` +
+		`"Proxy":{"squad":"coding","memory_size":"large","auto_update":true,"last_memory_update":123},` +
+		`"Old":{"auto_update":true}}}`
+	if err := os.WriteFile(filepath.Join(root, "collections.json"), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := CollectionsIn(root)
+	if squad, _ := c.CollectionProfile("Proxy"); squad != "coding" {
+		t.Fatalf("squad = %q, want coding", squad)
+	}
+	if err := c.SetCollectionColor("Proxy", "blue"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "collections.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, gone := range []string{"memory_size", "auto_update", "last_memory_update"} {
+		if strings.Contains(string(raw), gone) {
+			t.Errorf("%s must be dropped on write:\n%s", gone, raw)
+		}
+	}
+	// A profile that held only legacy keys is now empty and must not linger.
+	if strings.Contains(string(raw), `"Old": {`) {
+		t.Errorf("an emptied profile must be dropped:\n%s", raw)
+	}
+	if squad, _ := c.CollectionProfile("Proxy"); squad != "coding" {
+		t.Fatalf("squad after write = %q, want coding", squad)
 	}
 }

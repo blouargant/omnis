@@ -520,7 +520,6 @@ func run() error {
 			})
 		resume.restore(registry.List())
 	}
-	startCollectionAutoUpdate(rootCtx, deps, autoUpdateMinInterval())
 	engine := newEngine(deps)
 
 	// Start the scheduler timer loop (/loop + /schedule). The fire callback

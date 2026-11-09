@@ -1,12 +1,10 @@
 package main
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/blouargant/omnis/internal/collectionctx"
 	"github.com/blouargant/omnis/internal/sessions"
 )
 
@@ -63,49 +61,4 @@ func TestCollectionCascadeIsPerUser(t *testing.T) {
 		t.Fatalf("bob's session not returned to General: %q", m.Collection)
 	}
 	time.Sleep(50 * time.Millisecond) // let async persist goroutines settle before TempDir cleanup
-}
-
-// The auto-update worker must read only the owner's sessions and write to the
-// owner's collection store.
-func TestAutoUpdaterIsPerUser(t *testing.T) {
-	_, d, aliceSID, bobSID := newCookieTestEngine(t)
-	alice := sessions.CollectionsIn(userRoot("alice"))
-	bob := sessions.CollectionsIn(userRoot("bob"))
-	for _, c := range []*sessions.Collections{alice, bob} {
-		if _, _, err := c.AddCollection("Infra"); err != nil {
-			t.Fatal(err)
-		}
-		if err := c.SetCollectionProfileData("Infra", sessions.CollectionProfileData{AutoUpdate: true}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for sid, text := range map[string]string{aliceSID: "alice-fact", bobSID: "bob-secret"} {
-		m, _ := d.Registry.Get(sid)
-		m.Collection, m.Turns = "Infra", 1
-		if err := sessions.AppendConversationTurn(sid, "q", text); err != nil {
-			t.Fatal(err)
-		}
-	}
-	au := newAutoUpdater(d, 0)
-	var seen string
-	au.distill = func(_ context.Context, _, material string, _ int) (string, error) {
-		seen = material
-		return "distilled", nil
-	}
-	au.runCollection(context.Background(), "Infra", "alice")
-	if !strings.Contains(seen, "alice-fact") || strings.Contains(seen, "bob-secret") {
-		t.Fatalf("material not owner-scoped: %q", seen)
-	}
-	if got := ctxStoreFor("alice").ReadMemory("Infra"); got != "distilled" {
-		t.Fatalf("alice's memory not written: %q", got)
-	}
-	if got := ctxStoreFor("bob").ReadMemory("Infra"); got != "" {
-		t.Fatalf("bob's memory written: %q", got)
-	}
-	if got := collectionctx.ReadMemory("Infra"); got != "" {
-		t.Fatalf("shared memory written: %q", got)
-	}
-	if alice.CollectionProfileFull("Infra").LastMemoryUpdate == 0 {
-		t.Fatal("alice's last_memory_update not set")
-	}
 }

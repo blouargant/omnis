@@ -86,40 +86,20 @@ func TestRemoveCascadesProfileAndProse(t *testing.T) {
 	}
 }
 
-func TestCollectionProfilePreservesFields(t *testing.T) {
+func TestUpdateCollectionProfilePreservesOtherField(t *testing.T) {
 	t.Setenv("OMNIS_HOME", t.TempDir())
 	if _, _, err := AddCollection("Acme"); err != nil {
 		t.Fatal(err)
 	}
-	if err := SetCollectionProfileData("Acme", CollectionProfileData{
-		Squad: "Coding", MemorySize: "large", AutoUpdate: true, LastMemoryUpdate: 123,
-	}); err != nil {
+	if err := SetCollectionProfile("Acme", "Coding", "/tmp"); err != nil {
 		t.Fatal(err)
 	}
-	// A squad/cwd-only edit (the PATCH path) must NOT wipe memory_size/auto_update.
-	if err := SetCollectionProfile("Acme", "Kubernetes", "/tmp"); err != nil {
+	// A squad-only update (the PATCH path) must NOT wipe the cwd.
+	if err := UpdateCollectionProfile("Acme", func(p *CollectionProfileData) { p.Squad = "Kubernetes" }); err != nil {
 		t.Fatal(err)
 	}
-	p := CollectionProfileFull("Acme")
-	if p.Squad != "Kubernetes" || p.Cwd != "/tmp" {
-		t.Fatalf("squad/cwd not updated: %+v", p)
-	}
-	if p.MemorySize != "large" || !p.AutoUpdate || p.LastMemoryUpdate != 123 {
-		t.Fatalf("size/auto_update/last clobbered: %+v", p)
-	}
-	// The legacy two-value accessor still works.
-	if s, c := CollectionProfile("Acme"); s != "Kubernetes" || c != "/tmp" {
-		t.Fatalf("CollectionProfile = %q,%q", s, c)
-	}
-	// SetCollectionMemoryUpdate updates only the timestamp.
-	if err := SetCollectionMemoryUpdate("Acme", 0); err != nil {
-		t.Fatal(err)
-	}
-	if CollectionProfileFull("Acme").LastMemoryUpdate != 0 {
-		t.Fatal("last_memory_update not cleared")
-	}
-	if !ValidMemorySize("") || !ValidMemorySize("small") || ValidMemorySize("huge") {
-		t.Fatal("ValidMemorySize wrong")
+	if p := CollectionProfileFull("Acme"); p.Squad != "Kubernetes" || p.Cwd != "/tmp" {
+		t.Fatalf("profile = %+v, want Kubernetes /tmp", p)
 	}
 }
 
@@ -128,23 +108,21 @@ func TestCollectionProfileConcurrentFieldUpdates(t *testing.T) {
 	if _, _, err := AddCollection("Acme"); err != nil {
 		t.Fatal(err)
 	}
-	if err := SetCollectionProfileData("Acme", CollectionProfileData{Squad: "seed"}); err != nil {
-		t.Fatal(err)
-	}
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
 		wg.Add(2)
-		go func() { defer wg.Done(); _ = SetCollectionProfile("Acme", "Coding", "") }()
-		go func() { defer wg.Done(); _ = SetCollectionMemoryUpdate("Acme", 777) }()
+		go func() {
+			defer wg.Done()
+			_ = UpdateCollectionProfile("Acme", func(p *CollectionProfileData) { p.Squad = "Coding" })
+		}()
+		go func() {
+			defer wg.Done()
+			_ = UpdateCollectionProfile("Acme", func(p *CollectionProfileData) { p.Cwd = "/tmp" })
+		}()
 	}
 	wg.Wait()
-	// Atomic per-field merges ⇒ the final state keeps BOTH fields; neither the
-	// squad write nor the timestamp write can clobber the other.
-	p := CollectionProfileFull("Acme")
-	if p.Squad != "Coding" {
-		t.Fatalf("squad lost under concurrency: %+v", p)
-	}
-	if p.LastMemoryUpdate != 777 {
-		t.Fatalf("last_memory_update lost under concurrency: %+v", p)
+	// Atomic per-field merges ⇒ the final state keeps BOTH fields.
+	if p := CollectionProfileFull("Acme"); p.Squad != "Coding" || p.Cwd != "/tmp" {
+		t.Fatalf("field lost under concurrency: %+v", p)
 	}
 }

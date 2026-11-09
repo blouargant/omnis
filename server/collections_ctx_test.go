@@ -6,13 +6,21 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/blouargant/omnis/internal/collectionctx"
+	"github.com/blouargant/omnis/internal/collmem"
+	"github.com/blouargant/omnis/internal/paths"
 	"github.com/blouargant/omnis/internal/sessions"
 )
 
-func TestCollectionContextSizeAutoUpdateAndRevert(t *testing.T) {
+// TestCollectionContextHasNoMemoryText pins the removal of the single collection
+// Memory text: the context routes carry instructions only, the distiller and
+// revert routes are gone, and an older client still sending memory /
+// memory_size / auto_update is not refused (the extra fields are ignored).
+func TestCollectionContextHasNoMemoryText(t *testing.T) {
 	t.Setenv("OMNIS_HOME", t.TempDir())
 	if _, _, err := sessions.AddCollection("Acme"); err != nil {
 		t.Fatal(err)
@@ -34,65 +42,85 @@ func TestCollectionContextSizeAutoUpdateAndRevert(t *testing.T) {
 		return w
 	}
 
-	// PATCH size + auto-update.
-	if w := do(http.MethodPatch, "/api/collections/Acme", map[string]any{"memory_size": "large", "auto_update": true}); w.Code != http.StatusOK {
-		t.Fatalf("PATCH status %d: %s", w.Code, w.Body.String())
+	// PUT: instructions written, the legacy memory field ignored (no memory.md).
+	if w := do(http.MethodPut, "/api/collections/Acme/context", map[string]any{"instructions": "x", "memory": "y"}); w.Code != http.StatusOK {
+		t.Fatalf("PUT status %d: %s", w.Code, w.Body.String())
 	}
-	// A squad-only PATCH must not wipe them.
-	if w := do(http.MethodPatch, "/api/collections/Acme", map[string]any{"squad": ""}); w.Code != http.StatusOK {
-		t.Fatalf("PATCH squad status %d: %s", w.Code, w.Body.String())
+	if got := collectionctx.ReadInstructions("Acme"); got != "x" {
+		t.Fatalf("instructions = %q, want x", got)
 	}
-	// GET surfaces the fields.
-	var got struct {
-		MemorySize    string `json:"memory_size"`
-		AutoUpdate    bool   `json:"auto_update"`
-		HasPrevMemory bool   `json:"has_prev_memory"`
+	if _, err := os.Stat(filepath.Join(collectionctx.Dir("Acme"), "memory.md")); !os.IsNotExist(err) {
+		t.Fatalf("PUT must not create memory.md (stat err %v)", err)
 	}
+
+	// GET: instructions + scalars, no memory keys.
 	w := do(http.MethodGet, "/api/collections/Acme/context", nil)
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET status %d: %s", w.Code, w.Body.String())
 	}
-	json.Unmarshal(w.Body.Bytes(), &got)
-	if got.MemorySize != "large" || !got.AutoUpdate {
-		t.Fatalf("fields not persisted: %+v", got)
+	var snap map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &snap); err != nil {
+		t.Fatal(err)
 	}
-	if got.HasPrevMemory {
-		t.Fatal("unexpected prev memory")
+	if snap["instructions"] != "x" {
+		t.Fatalf("GET instructions = %v", snap["instructions"])
 	}
-	// Invalid size rejected.
-	if w := do(http.MethodPatch, "/api/collections/Acme", map[string]any{"memory_size": "huge"}); w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for bad size, got %d", w.Code)
+	for _, gone := range []string{"memory", "memory_size", "auto_update", "last_memory_update", "has_prev_memory"} {
+		if _, ok := snap[gone]; ok {
+			t.Errorf("GET context must not carry %q: %s", gone, w.Body.String())
+		}
+	}
+	for _, kept := range []string{"squad", "cwd", "color"} {
+		if _, ok := snap[kept]; !ok {
+			t.Errorf("GET context must carry %q: %s", kept, w.Body.String())
+		}
 	}
 
-	// Simulate an auto-commit: prev snapshot + new memory + timestamp.
-	collectionctx.WriteMemory("Acme", "new facts")
-	collectionctx.WritePrevMemory("Acme", "old facts")
-	sessions.SetCollectionMemoryUpdate("Acme", 111)
-	w = do(http.MethodGet, "/api/collections/Acme/context", nil)
-	json.Unmarshal(w.Body.Bytes(), &got)
-	if !got.HasPrevMemory {
-		t.Fatal("expected has_prev_memory true")
+	// PATCH from an older client: the removed scalars are ignored, not a 400.
+	if w := do(http.MethodPatch, "/api/collections/Acme", map[string]any{"memory_size": "huge", "auto_update": true}); w.Code != http.StatusOK {
+		t.Fatalf("PATCH with legacy fields status %d: %s", w.Code, w.Body.String())
 	}
-	// Revert restores prev + consumes the snapshot.
-	if w := do(http.MethodPost, "/api/collections/Acme/memory/revert", nil); w.Code != http.StatusOK {
-		t.Fatalf("revert status %d: %s", w.Code, w.Body.String())
+	raw, _ := os.ReadFile(sessions.CollectionsPath())
+	if bytes.Contains(raw, []byte("memory_size")) || bytes.Contains(raw, []byte("auto_update")) {
+		t.Fatalf("legacy scalars persisted: %s", raw)
 	}
-	if m := collectionctx.ReadMemory("Acme"); m != "old facts" {
-		t.Fatalf("revert did not restore memory: %q", m)
+
+	// The distiller and revert routes are gone.
+	for _, p := range []string{"/api/collections/Acme/memory/distill", "/api/collections/Acme/memory/revert"} {
+		if w := do(http.MethodPost, p, nil); w.Code != http.StatusNotFound {
+			t.Errorf("POST %s = %d, want 404", p, w.Code)
+		}
 	}
-	if collectionctx.HasPrevMemory("Acme") {
-		t.Fatal("revert did not consume snapshot")
+
+	// GET /api/collections reports each collection's memory count (General too).
+	store := collmem.In(paths.ConfigWriteDir())
+	for _, col := range []string{"", "Acme"} {
+		if _, _, err := store.Save(col, collmem.Memory{Name: "fact", Type: "project", Body: "A fact."}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if sessions.CollectionProfileFull("Acme").LastMemoryUpdate != 0 {
-		t.Fatal("revert did not clear last_memory_update")
+	w = do(http.MethodGet, "/api/collections", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list status %d: %s", w.Code, w.Body.String())
 	}
-	// A manual memory PUT clears a fresh snapshot (the net covers only unreviewed auto-commits).
-	collectionctx.WritePrevMemory("Acme", "snapshot2")
-	sessions.SetCollectionMemoryUpdate("Acme", 222)
-	if w := do(http.MethodPut, "/api/collections/Acme/context", map[string]any{"memory": "hand edited"}); w.Code != http.StatusOK {
-		t.Fatalf("PUT status %d: %s", w.Code, w.Body.String())
+	var list struct {
+		Collections []struct {
+			Name       string `json:"name"`
+			Memories   int    `json:"memories"`
+			HasContext bool   `json:"has_context"`
+		} `json:"collections"`
 	}
-	if collectionctx.HasPrevMemory("Acme") || sessions.CollectionProfileFull("Acme").LastMemoryUpdate != 0 {
-		t.Fatal("manual PUT did not consume snapshot")
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int{}
+	for _, c := range list.Collections {
+		got[c.Name] = c.Memories
+		if c.Name == "Acme" && !c.HasContext {
+			t.Errorf("Acme has instructions, has_context must be true")
+		}
+	}
+	if got[sessions.GeneralCollection] != 1 || got["Acme"] != 1 {
+		t.Fatalf("memories = %v, want General:1 Acme:1", got)
 	}
 }

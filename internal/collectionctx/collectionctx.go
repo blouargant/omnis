@@ -9,12 +9,13 @@
 // Storage is filesystem-only under $OMNIS_HOME/collections/<name>/:
 //
 //	instructions.md — hand-edited, stable (imperative guidance)
-//	memory.md       — legacy memory, migrated into internal/collmem on first use
-//	                  (still read/written by the server until it moves to collmem)
+//
+// (The collection's memories live beside it in memory/, owned by
+// internal/collmem, which also migrates a legacy memory.md.)
 //
 // The package depends only on internal/paths + stdlib (no agent/sessions import),
 // so the agent package can resolve the injected block without an import cycle and
-// both the server and any future distiller can read/write the files. With no
+// the server can read/write the files. With no
 // files for a collection (or the virtual General bucket, whose name resolves to
 // ""), Resolve returns "" — a zero-cost no-op, so behaviour is unchanged for
 // anyone not using the feature.
@@ -30,11 +31,7 @@ import (
 	"github.com/blouargant/omnis/internal/paths"
 )
 
-const (
-	instructionsFile = "instructions.md"
-	memoryFile       = "memory.md"
-	prevMemoryFile   = "memory.prev.md"
-)
+const instructionsFile = "instructions.md"
 
 // baseDir is the parent of every per-collection directory. It sits beside
 // collections.json (both under paths.ConfigWriteDir()) so a collection's scalars
@@ -59,16 +56,8 @@ func shared() *Store { return &Store{base: baseDir()} }
 
 func Dir(name string) string                    { return shared().Dir(name) }
 func InstructionsPath(name string) string       { return shared().InstructionsPath(name) }
-func MemoryPath(name string) string             { return shared().MemoryPath(name) }
-func PrevMemoryPath(name string) string         { return shared().PrevMemoryPath(name) }
 func ReadInstructions(name string) string       { return shared().ReadInstructions(name) }
-func ReadMemory(name string) string             { return shared().ReadMemory(name) }
-func ReadPrevMemory(name string) string         { return shared().ReadPrevMemory(name) }
 func WriteInstructions(name, text string) error { return shared().WriteInstructions(name, text) }
-func WriteMemory(name, text string) error       { return shared().WriteMemory(name, text) }
-func WritePrevMemory(name, text string) error   { return shared().WritePrevMemory(name, text) }
-func HasPrevMemory(name string) bool            { return shared().HasPrevMemory(name) }
-func RemovePrevMemory(name string) error        { return shared().RemovePrevMemory(name) }
 func RenameDir(oldName, newName string) error   { return shared().RenameDir(oldName, newName) }
 func RemoveDir(name string) error               { return shared().RemoveDir(name) }
 func HasContext(name string) bool               { return shared().HasContext(name) }
@@ -100,23 +89,19 @@ func (s *Store) Dir(name string) string {
 	return filepath.Join(s.base, seg)
 }
 
-// InstructionsPath / MemoryPath return the on-disk path of a collection's two
-// prose files, or "" for an unusable name.
-func (s *Store) InstructionsPath(name string) string { return s.filePath(name, instructionsFile) }
-func (s *Store) MemoryPath(name string) string       { return s.filePath(name, memoryFile) }
-
-func (s *Store) filePath(name, leaf string) string {
+// InstructionsPath returns the on-disk path of a collection's instructions, or
+// "" for an unusable name.
+func (s *Store) InstructionsPath(name string) string {
 	dir := s.Dir(name)
 	if dir == "" {
 		return ""
 	}
-	return filepath.Join(dir, leaf)
+	return filepath.Join(dir, instructionsFile)
 }
 
-// ReadInstructions / ReadMemory return the raw text of a collection's file, or ""
+// ReadInstructions returns the raw text of a collection's instructions, or ""
 // when it is missing/unreadable/unusable name.
 func (s *Store) ReadInstructions(name string) string { return readFile(s.InstructionsPath(name)) }
-func (s *Store) ReadMemory(name string) string       { return readFile(s.MemoryPath(name)) }
 
 func readFile(path string) string {
 	if path == "" {
@@ -129,42 +114,11 @@ func readFile(path string) string {
 	return string(data)
 }
 
-// WriteInstructions / WriteMemory replace a collection's file. An empty body
-// removes the file (so an emptied editor field leaves no stray file behind). An
-// unusable name is an error.
+// WriteInstructions replaces a collection's instructions. An empty body removes
+// the file (so an emptied editor field leaves no stray file behind). An unusable
+// name is an error.
 func (s *Store) WriteInstructions(name, text string) error {
 	return writeFile(s.InstructionsPath(name), text)
-}
-func (s *Store) WriteMemory(name, text string) error { return writeFile(s.MemoryPath(name), text) }
-
-// PrevMemoryPath returns the on-disk path of a collection's previous-memory
-// snapshot (used by auto-update's revert net), or "" for an unusable name.
-func (s *Store) PrevMemoryPath(name string) string { return s.filePath(name, prevMemoryFile) }
-
-// ReadPrevMemory returns the previous-memory snapshot text, or "" when absent.
-func (s *Store) ReadPrevMemory(name string) string { return readFile(s.PrevMemoryPath(name)) }
-
-// WritePrevMemory replaces the snapshot (an empty body removes it).
-func (s *Store) WritePrevMemory(name, text string) error {
-	return writeFile(s.PrevMemoryPath(name), text)
-}
-
-// HasPrevMemory reports whether a non-empty snapshot exists (so the UI only
-// offers Revert when there is prior memory to restore).
-func (s *Store) HasPrevMemory(name string) bool {
-	return strings.TrimSpace(s.ReadPrevMemory(name)) != ""
-}
-
-// RemovePrevMemory drops the snapshot; a missing file is a no-op.
-func (s *Store) RemovePrevMemory(name string) error {
-	p := s.PrevMemoryPath(name)
-	if p == "" {
-		return nil
-	}
-	if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
 }
 
 func writeFile(path, text string) error {
@@ -203,7 +157,7 @@ func writeFile(path, text string) error {
 }
 
 // RenameDir migrates a collection's prose directory when the collection is
-// renamed, so its instructions/memory follow the new name. Best-effort: a
+// renamed, so its instructions and memories follow the new name. Best-effort: a
 // missing source (no prose yet) or a name change that only differs in case is a
 // no-op, and it never clobbers an existing destination.
 func (s *Store) RenameDir(oldName, newName string) error {

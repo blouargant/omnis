@@ -187,22 +187,3 @@ func TestCollectionCountsAreScoped(t *testing.T) {
 		t.Errorf("General count as alice = %d, want 1 (bob's session must not count)", got)
 	}
 }
-
-// The collection-memory distiller only reads the caller's own chats.
-func TestCollectionMaterialIsScoped(t *testing.T) {
-	t.Setenv("OMNIS_HOME", t.TempDir())
-	reg := sessions.NewEmptyRegistry()
-	d := serverDeps{Registry: reg}
-	for owner, text := range map[string]string{"alice": "alice-secret", "bob": "bob-secret"} {
-		m := reg.NewFor(owner, "system")
-		m.Collection = "Work"
-		m.Turns = 1
-		if err := sessions.AppendConversationTurn(m.ID, text, "ok"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	mat := gatherCollectionMaterialFor(d, "Work", "alice")
-	if !strings.Contains(mat, "alice-secret") || strings.Contains(mat, "bob-secret") {
-		t.Fatalf("material for alice: %q", mat)
-	}
-}
