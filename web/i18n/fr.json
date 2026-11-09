@@ -1060,5 +1060,19 @@
   "set.plugins.toggleAria": "Activer le plugin {name}",
   "tree.showForks": "Afficher les copies ({count})",
   "tree.hideForks": "Masquer les copies",
-  "menu.duplicate": "Dupliquer"
+  "menu.duplicate": "Dupliquer",
+  "chat.memory.saved": "Mémoire enregistrée : {name}",
+  "chat.memory.updated": "Mémoire mise à jour : {name}",
+  "chat.memory.deleted": "Mémoire supprimée : {name}",
+  "env.memory.title": "Mémoire",
+  "memory.type.feedback": "Retour",
+  "memory.type.user": "Utilisateur",
+  "memory.type.project": "Projet",
+  "memory.type.reference": "Référence",
+  "memory.edit": "Modifier",
+  "memory.delete": "Supprimer",
+  "memory.deleteConfirm": "Supprimer la mémoire « {name} » ? Cette action est irréversible.",
+  "memory.gone": "Cette mémoire n’existe plus.",
+  "memory.typeLabel": "Type",
+  "memory.bodyLabel": "Contenu"
 }

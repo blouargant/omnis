@@ -2027,6 +2027,206 @@ function skillLoadFailed(resp, name) {
   return typeof resp.instructions !== "string" || !resp.instructions.trim();
 }
 
+// ─── Collection memory ───────────────────────────────────────────────────────
+// The agent's memory_save / memory_delete calls show as a compact chip in the
+// transcript (memory-ui.js decides the label); clicking it opens a small view of
+// the memory (edit / delete). The environment panel's Memory card lists the
+// focused session's collection memories. Both stay in sync on `memory_changed`.
+
+const memoriesCache = new Map(); // collection key → Promise<[{name,description,type,updated,body}]>
+let memoryDialog = null;         // the open memory view: {collection, name, refresh}
+
+// memoryCollectionKey folds "" / any case of General onto General, so one cache
+// entry serves both spellings.
+function memoryCollectionKey(collection) {
+  const c = (collection || "").trim();
+  return !c || c.toLowerCase() === GENERAL_COLLECTION.toLowerCase() ? GENERAL_COLLECTION : c;
+}
+
+// memoryCollectionOf is the collection a session's memories live in.
+function memoryCollectionOf(sessionId) {
+  const meta = sessionId ? sessionMetaById(sessionId) : null;
+  return meta ? effectiveCollection(meta) : GENERAL_COLLECTION;
+}
+
+// loadMemories returns the collection's memories, cached per collection until a
+// memory_changed event drops the entry. "" or "General" ⇒ General.
+async function loadMemories(collection) {
+  const key = memoryCollectionKey(collection);
+  if (!memoriesCache.has(key)) {
+    const p = (async () => {
+      const res = await apiFetch(`/api/collections/${encodeURIComponent(key)}/memories`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`memories ${res.status}`);
+      return (await res.json()).memories || [];
+    })();
+    memoriesCache.set(key, p);
+    p.catch(() => { if (memoriesCache.get(key) === p) memoriesCache.delete(key); });
+  }
+  return memoriesCache.get(key);
+}
+
+// onMemoryChanged handles a memory_changed event: drop that collection's cache,
+// re-render the Memory card and any open memory view of that collection.
+function onMemoryChanged(data) {
+  const key = memoryCollectionKey(data && data.collection);
+  memoriesCache.delete(key);
+  if (window.EnvPanel) EnvPanel.refresh("memory");
+  if (memoryDialog && memoryCollectionKey(memoryDialog.collection) === key) memoryDialog.refresh();
+}
+
+// appendMemoryChip renders the transcript chip for a successful save / delete.
+function appendMemoryChip(label, collection, container) {
+  const row = document.createElement("div");
+  row.className = "tool-row";
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "memory-chip";
+  chip.innerHTML = `<span class="memory-chip-icon" aria-hidden="true">✎</span>` +
+    `<span class="memory-chip-label">${escHtml(tr(label.key, label.vars))}</span>`;
+  chip.addEventListener("click", () => openMemoryView(collection, label.vars.name));
+  row.appendChild(chip);
+  (container || fpTranscript()).appendChild(row);
+}
+
+// renderMemoryCall renders a finished memory tool call (live or replayed): the
+// chip for a successful save / delete, nothing for a read, and the normal tool
+// block for a failure so it stays visible.
+function renderMemoryCall(name, args, response, durationMs, sessionId, container) {
+  if (memoryToolFailed(name, response)) {
+    const b = appendToolCall(name, args, container);
+    resolveToolCall(b, response, durationMs);
+    refreshToolGroup(b.closest(".tool-group"));
+    return;
+  }
+  const label = memoryChipLabel(name, response);
+  if (label) appendMemoryChip(label, memoryCollectionOf(sessionId), container);
+}
+
+function memoryTypeLabel(type) {
+  return ["feedback", "user", "project", "reference"].includes(type) ? tr("memory.type." + type) : (type || "");
+}
+
+// openMemoryView opens a small dialog showing one memory (type, description,
+// body) with Edit / Delete. It follows memory_changed while open; a memory that
+// no longer exists shows a note instead.
+function openMemoryView(collection, name) {
+  if (memoryDialog) memoryDialog.close();
+  const overlay = uiModalShell(name);
+  overlay.querySelector(".ui-modal").classList.add("memory-modal");
+  const body = overlay.querySelector(".user-cmd-modal-body");
+  const footer = overlay.querySelector(".user-cmd-modal-footer");
+  const cancel = overlay.querySelector(".ui-modal-cancel");
+  const ok = overlay.querySelector(".ui-modal-ok");
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "danger memory-modal-delete";
+  del.textContent = tr("memory.delete");
+  footer.insertBefore(del, cancel);
+
+  let editing = false;
+  let current = null;
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey, true);
+    if (memoryDialog === dlg) memoryDialog = null;
+  };
+  // Escape closes this view only when it is the topmost dialog (not while the
+  // delete confirmation sits on top of it).
+  const onKey = (e) => {
+    const all = document.querySelectorAll(".ui-modal-overlay");
+    if (e.key === "Escape" && all[all.length - 1] === overlay) { e.preventDefault(); close(); }
+  };
+  document.addEventListener("keydown", onKey, true);
+  overlay.querySelector(".ui-modal-close").addEventListener("click", close);
+  overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
+
+  const showView = () => {
+    editing = false;
+    cancel.textContent = tr("common.close");
+    ok.textContent = tr("memory.edit");
+    if (!current) {
+      body.innerHTML = `<div class="memory-modal-gone">${escHtml(tr("memory.gone"))}</div>`;
+      ok.hidden = true; del.hidden = true;
+      return;
+    }
+    ok.hidden = false; del.hidden = false;
+    body.innerHTML = `<div class="memory-modal-meta"><span class="memory-modal-type"></span><span class="memory-modal-desc"></span></div>` +
+      `<div class="memory-modal-body bubble-assistant rendered"></div>`;
+    body.querySelector(".memory-modal-type").textContent = memoryTypeLabel(current.type);
+    body.querySelector(".memory-modal-desc").textContent = current.description || "";
+    renderMarkdown(body.querySelector(".memory-modal-body"), current.body || "");
+  };
+  const showEdit = () => {
+    editing = true;
+    cancel.textContent = tr("common.cancel");
+    ok.textContent = tr("common.save");
+    del.hidden = true;
+    const types = ["feedback", "user", "project", "reference"];
+    body.innerHTML =
+      `<label class="user-cmd-field"><span class="user-cmd-field-label">${escHtml(tr("memory.typeLabel"))}</span>` +
+        `<select class="memory-edit-type">${types.map(t => `<option value="${t}">${escHtml(memoryTypeLabel(t))}</option>`).join("")}</select></label>` +
+      `<label class="user-cmd-field"><span class="user-cmd-field-label">${escHtml(tr("common.description"))}</span>` +
+        `<input type="text" class="memory-edit-desc" autocomplete="off" /></label>` +
+      `<label class="user-cmd-field"><span class="user-cmd-field-label">${escHtml(tr("memory.bodyLabel"))}</span>` +
+        `<textarea class="memory-edit-body" rows="8" spellcheck="false"></textarea></label>`;
+    body.querySelector(".memory-edit-type").value = types.includes(current.type) ? current.type : "project";
+    body.querySelector(".memory-edit-desc").value = current.description || "";
+    body.querySelector(".memory-edit-body").value = current.body || "";
+    body.querySelector(".memory-edit-desc").focus();
+  };
+  const load = async () => {
+    try {
+      const list = await loadMemories(collection);
+      current = list.find(m => m.name === name) || null;
+    } catch (e) {
+      console.error("load memories failed:", e);
+      current = null;
+    }
+    if (!editing && overlay.isConnected) showView();
+  };
+
+  cancel.addEventListener("click", () => { if (editing) showView(); else close(); });
+  ok.addEventListener("click", async () => {
+    if (!editing) { if (current) showEdit(); return; }
+    const payload = {
+      type: body.querySelector(".memory-edit-type").value,
+      description: body.querySelector(".memory-edit-desc").value.trim(),
+      body: body.querySelector(".memory-edit-body").value,
+    };
+    ok.disabled = true;
+    try {
+      const res = await apiFetch(`/api/collections/${encodeURIComponent(memoryCollectionKey(collection))}/memories/${encodeURIComponent(name)}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.status);
+      current = (await res.json()).memory || { ...current, ...payload };
+      onMemoryChanged({ collection });
+      showView();
+    } catch (e) {
+      showToast(tr("common.error") + ": " + e.message, "err");
+    } finally {
+      ok.disabled = false;
+    }
+  });
+  del.addEventListener("click", async () => {
+    const yes = await uiConfirm({ title: tr("memory.delete"), message: tr("memory.deleteConfirm", { name }), confirmText: tr("memory.delete"), danger: true });
+    if (!yes) return;
+    try {
+      const res = await apiFetch(`/api/collections/${encodeURIComponent(memoryCollectionKey(collection))}/memories/${encodeURIComponent(name)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.status);
+      onMemoryChanged({ collection });
+      close();
+    } catch (e) {
+      showToast(tr("common.error") + ": " + e.message, "err");
+    }
+  });
+
+  const dlg = { collection, name, refresh: load, close };
+  memoryDialog = dlg;
+  body.innerHTML = "";
+  load();
+}
+
 function renderSkillsDock(panel) {
   if (!panel || !panel.root) return;
   if (panel === fp() && window.EnvPanel) EnvPanel.refresh("skills");
@@ -9092,6 +9292,10 @@ async function subscribeGlobalEvents() {
         } else if (event === "produced_changed" && sid) {
           // An agent created a file in this session — refresh the Résultats card.
           if (sid === activeSessionId && window.EnvPanel) EnvPanel.refresh("results");
+        } else if (event === "memory_changed") {
+          // A memory was saved / updated / deleted (by an agent or from another
+          // browser): drop that collection's cache, refresh the card and view.
+          onMemoryChanged(data);
         } else if (event === "skills_changed" && sid) {
           // A skill / soft-skill was loaded in this session — refresh its dock.
           if (panelsWithTab(sid).length > 0 || sessionSkills.has(sid)) refreshSkills(sid);
@@ -9656,6 +9860,7 @@ function renderHistoryTurn(turn, container, index) {
   const text = turn.assistant_text || "";
   const tools = (turn.tools || []).filter(c =>
     !isRoutingTool(c.name) && !isTodoTool(c.name) && !(isSkillLoadTool(c.name) && !c.error));
+  const sessionId = sessionIdOfNode(container);
   let pos = 0;
   let bubble = null;
   for (const c of tools) {
@@ -9664,6 +9869,10 @@ function renderHistoryTurn(turn, container, index) {
       const seg = text.slice(pos, off);
       if (seg.trim()) { bubble = appendAssistantBubble(container); renderMarkdown(bubble, seg); }
       pos = off;
+    }
+    if (isMemoryTool(c.name)) {
+      renderMemoryCall(c.name, c.args, toolRecordResponse(c), c.duration_ms, sessionId, container);
+      continue;
     }
     const block = appendToolCall(c.name, c.args, container);
     for (const k of c.children || []) {
@@ -10090,6 +10299,9 @@ async function sendMessage(panel) {
   // Their calls are held here so a FAILED load can still be shown as a tool
   // block when its result arrives. call_id → { name, args }.
   const skillCalls = new Map();
+  // Memory tool calls held until their result: a successful save / delete shows
+  // as a chip, a read as nothing, a failure as the normal error tool block.
+  const memoryCalls = new Map();
 
   const takePending = (queue, callID) => {
     if (callID) {
@@ -10195,6 +10407,12 @@ async function sendMessage(panel) {
             setSessionStatus(sessionId, `running ${data.name}…`);
             break;
           }
+          if (isMemoryTool(data.name)) {
+            memoryCalls.set(data.call_id || "", { name: data.name, args: data.args });
+            activeOuterBlock = null;
+            setSessionStatus(sessionId, `running ${data.name}…`);
+            break;
+          }
           // The todo_* tools render as a live, always-expanded checklist
           // instead of an opaque collapsed block. Their tool_result carries
           // no extra signal, so we don't track them in pendingTools.
@@ -10217,6 +10435,14 @@ async function sendMessage(panel) {
         }
 
         case "tool_result": {
+          if (memoryCalls.has(data.call_id || "")) {
+            const mc = memoryCalls.get(data.call_id || "");
+            memoryCalls.delete(data.call_id || "");
+            renderMemoryCall(mc.name, mc.args, data.response, data.duration_ms, sessionId, container);
+            activeOuterBlock = null;
+            setSessionStatus(sessionId, "thinking…");
+            break;
+          }
           if (skillCalls.has(data.call_id || "")) {
             const sc = skillCalls.get(data.call_id || "");
             skillCalls.delete(data.call_id || "");
@@ -13110,6 +13336,37 @@ function registerEnvCards() {
           EnvPanel.refresh("skills");
         });
         body.appendChild(item);
+      }
+    },
+  });
+  // The focused session's collection memories: one row per memory (type, name,
+  // description on a delayed tip); a click opens the memory view. Hidden when
+  // the collection has none.
+  EnvPanel.register({
+    id: "memory",
+    title: () => tr("env.memory.title"),
+    sessionOnly: true,
+    async render(body, ctx) {
+      const collection = memoryCollectionOf(ctx.sessionId);
+      let memories = [];
+      try { memories = await loadMemories(collection); } catch (_) { /* keep empty */ }
+      if (ctx.stale()) return;
+      ctx.setVisible(memories.length > 0);
+      ctx.setValue(String(memories.length));
+      if (!ctx.open) return;
+      body.innerHTML = "";
+      for (const m of memories) {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "env-row env-row-btn env-memory";
+        row.innerHTML = `<span class="env-memory-type">${escHtml(memoryTypeLabel(m.type))}</span>` +
+          `<span class="env-row-text">${escHtml(m.name)}</span>`;
+        if (m.description) {
+          row.setAttribute("data-tip", m.description);
+          row.setAttribute("data-tip-delay", "700");
+        }
+        row.addEventListener("click", () => openMemoryView(collection, m.name));
+        body.appendChild(row);
       }
     },
   });

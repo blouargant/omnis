@@ -1060,5 +1060,19 @@
   "set.plugins.toggleAria": "Enable plugin {name}",
   "tree.showForks": "Show forks ({count})",
   "tree.hideForks": "Hide forks",
-  "menu.duplicate": "Duplicate"
+  "menu.duplicate": "Duplicate",
+  "chat.memory.saved": "Memory saved: {name}",
+  "chat.memory.updated": "Memory updated: {name}",
+  "chat.memory.deleted": "Memory deleted: {name}",
+  "env.memory.title": "Memory",
+  "memory.type.feedback": "Feedback",
+  "memory.type.user": "User",
+  "memory.type.project": "Project",
+  "memory.type.reference": "Reference",
+  "memory.edit": "Edit",
+  "memory.delete": "Delete",
+  "memory.deleteConfirm": "Delete the memory “{name}”? This cannot be undone.",
+  "memory.gone": "This memory no longer exists.",
+  "memory.typeLabel": "Type",
+  "memory.bodyLabel": "Content"
 }

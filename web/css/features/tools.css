@@ -568,3 +568,24 @@
   padding: 8px 10px;
 }
 .tool-group .tool-pre.tool-error { color: var(--danger-fg); }
+
+/* Collection memory: a successful memory_save / memory_delete shows as a compact
+   chip in the transcript; clicking it opens the memory view. */
+.memory-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin: 2px 0;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+.memory-chip:hover { color: var(--text); border-color: var(--accent); }
+.memory-chip-icon { flex-shrink: 0; color: var(--accent); }
+.memory-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

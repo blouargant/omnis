@@ -270,3 +270,11 @@ body.term-shown .chat-pane.env-host > :not(.pane-tabbar):not(#env-panel):not(#te
   word-break: break-word;
 }
 .env-tasks-chevron { color: var(--text-faint); }
+
+/* Memory card: the type as a small label before the memory's name. */
+.env-memory-type {
+  flex-shrink: 0;
+  min-width: 64px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+}

@@ -1060,5 +1060,19 @@
   "set.plugins.toggleAria": "Plugin {name} aktivieren",
   "tree.showForks": "Kopien anzeigen ({count})",
   "tree.hideForks": "Kopien ausblenden",
-  "menu.duplicate": "Duplizieren"
+  "menu.duplicate": "Duplizieren",
+  "chat.memory.saved": "Erinnerung gespeichert: {name}",
+  "chat.memory.updated": "Erinnerung aktualisiert: {name}",
+  "chat.memory.deleted": "Erinnerung gelöscht: {name}",
+  "env.memory.title": "Erinnerungen",
+  "memory.type.feedback": "Feedback",
+  "memory.type.user": "Benutzer",
+  "memory.type.project": "Projekt",
+  "memory.type.reference": "Referenz",
+  "memory.edit": "Bearbeiten",
+  "memory.delete": "Löschen",
+  "memory.deleteConfirm": "Die Erinnerung „{name}“ löschen? Dies kann nicht rückgängig gemacht werden.",
+  "memory.gone": "Diese Erinnerung existiert nicht mehr.",
+  "memory.typeLabel": "Typ",
+  "memory.bodyLabel": "Inhalt"
 }
