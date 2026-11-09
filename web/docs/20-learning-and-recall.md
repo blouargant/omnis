@@ -1,5 +1,33 @@
 # Session Learning & Semantic Recall
 
+## Memory
+
+The main way Omnis learns your way of working is **collection memory**: when you
+correct the agent, state a preference, or ask it to remember something, the
+agent saves a small memory **in that same turn**, and every later chat of the
+same collection starts with it — you don't have to say it again, and the agent
+doesn't have to go looking for it.
+
+- **Scope** — one memory per collection; chats outside any collection share
+  **General**'s memory.
+- **What is kept** — four types: **Feedback** (corrections and confirmed ways of
+  working) and **User** (who you are, your preferences) are given to the agent in
+  full on every turn; **Project** (decisions, constraints, dates) and
+  **Reference** (links, where things live) are listed by name, and the agent
+  opens the ones it needs.
+- **What is not** — what the repository or `AGENT.md` already says, what only
+  matters to the current chat, anything that came from a web page, a file, a
+  tool's output or another agent, and secrets.
+- **Visible and editable** — each save or delete shows as a chip in the
+  conversation; the environment panel's **Memory** card, the collection's
+  **Edit context** dialog and **`/memory`** let you read, edit, add and delete
+  memories.
+
+See [Sessions → Collection memory](03-sessions.md#collection-memory) for the
+details.
+
+## Soft-skills and precedents
+
 Every finished session leaves two durable traces that make future sessions
 smarter:
 

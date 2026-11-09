@@ -830,7 +830,9 @@ keys: `planning` (todo + task graph), `worktree`, `bg`, and `spawn`
 spawning"). **Always-on for any
 squad root** (not gated): the teammate **mailbox** (so the root stays
 reachable cross-session — another squad can `teammate_ask` the Helper to
-install a skill) and **ask_user**. **Coordinating-leader-only** (skipped when
+install a skill) and **ask_user**; on every **non-router** root also the
+collection-memory tools `memory_save`/`memory_read`/`memory_delete` (see
+"Collection memory"). **Coordinating-leader-only** (skipped when
 leaderless): sub-agent delegation tools, `curate_session`,
 `record_session_feedback`. A coordinating leader additionally keeps
 embedder-backed soft-skill recall (`toolsForAgentConfig`'s `asLeader` path);
@@ -1111,7 +1113,8 @@ Resulting tags are applied to `_stats.json` via `Stats.RecordTag`.
 | `internal/shellcomplete/` | Dependency-free bash-like tab completion (`Complete(line, cwd)`): `$PATH` executables for the first token, filesystem paths otherwise. Backs the `!` shell-escape completion in TUI + web. `CompletePath(token, cwd)` is the path-only variant backing `@file` reference completion |
 | `internal/fileref/` | "@path" chat file references: `Spans`/`Tokens`/`Classify`/`Resolve`/`Context`. Parses `@`-prefixed path tokens (at line start or after whitespace, so emails are excluded), classifies them as file/dir/missing, and inlines referenced **file** contents as an extra user-turn part. Shared by the server, TUI, and CLI send paths; the grammar is mirrored in `web/app.js` |
 | `internal/agentmd/` | AGENT.md project memory (omnis's `CLAUDE.md` equivalent): `Resolve(cwd)` discovers + concatenates AGENT.md across layers (system → user → `.agents/` → project walk-up) with a per-cwd mtime cache; `InitPrompt()` is the shared `/init` bootstrap prompt; `AppendMemory(cwd, line)` backs the `#` shortcut. Injected into the leader/root system instruction per turn by the `agentmd` plugin ([agent/agentmd_plugin.go](agent/agentmd_plugin.go), registered in [agent/build_plugins.go](agent/build_plugins.go)) |
-| `internal/collectionctx/` | **Per-collection context** (the thematic, cross-repo analogue of AGENT.md — see "Collection context"): `Resolve(name)` renders a collection's `instructions.md` + `memory.md` (`$OMNIS_HOME/collections/<name>/`) into a `<collection-context>` block with a per-name mtime cache; `Read/Write{Instructions,Memory}`, `HasContext`, `RenameDir`, `RemoveDir`. Imports only `internal/paths` + stdlib (no `agent`/`sessions` cycle). Injected on **every** squad root (the router included, under a routing-scoped framing — see "Collection context") per turn by the `collection_ctx` plugin ([agent/collection_plugin.go](agent/collection_plugin.go)), keyed on the session's collection via `agent.SetCollectionResolver` |
+| `internal/collectionctx/` | **Per-collection context** (the thematic, cross-repo analogue of AGENT.md — see "Collection context"): `Resolve(name)` renders a collection's `instructions.md` (`<root>/collections/<name>/`) into a `<collection-context>` block with a per-root+name mtime cache; `Read/WriteInstructions`, `HasContext` (instructions only), `RenameDir`, `RemoveDir` (the whole collection dir, so its `memory/` follows). Imports only `internal/paths` + stdlib (no `agent`/`sessions` cycle). Injected on **every** squad root (the router included, under a routing-scoped framing — see "Collection context") per turn by the `collection_ctx` plugin ([agent/collection_plugin.go](agent/collection_plugin.go)), keyed on the session's collection via `agent.SetCollectionResolver` |
+| `internal/collmem/` | **Collection memory** (see "Collection memory"): one Markdown file per fact under `<root>/collections/<name>/memory/<name>.md` (General: `<root>/general-memory/`). `Store` = `In(root)`; `Save`/`Get`/`Delete`/`List` (per-directory lock + atomic write; name `^[a-z0-9][a-z0-9-]{0,63}$`, types feedback/user/project/reference, body ≤ 4000 runes, ≤ 200 per collection); `Render` builds the injected `<collection-memory>` block (cached on the memory dir's entries); `EnsureMigrated` imports a legacy `memory.md`. Stdlib only |
 | `internal/claudeplugins/` | Discovers **Claude Code plugins** under `<AgentSkillsDir>/claude/` (marketplace.json → `plugin.json`, `agents/*.md`, `skills/`, `hooks/hooks.json`); read-only, a broken plugin is a warning. Conversion to omnis agents/squad/hook layers lives in [agent/claude_plugins.go](agent/claude_plugins.go). See "Claude Code plugins" |
 | `internal/softskills/` | Curator output: `load_softskill`, `list_softskills` (reads `softskills/`); `Stats` sidecar + `ReflectHeuristic` (deterministic per-skill helpful/harmful/neutral tagging); `recall.go` adds the embedder-gated `recall_softskills` semantic-rank tool |
 | `internal/semindex/` | Reusable persistence + query layer over a go-turbovec `IdMapIndex` (`.tvim` + `.meta.json` sidecar + manifest); `Open`/`Upsert`/`Query`/`Remove`/`Save`/`Unload`. Backs all six recall features; nil-embedder handles degrade with `ErrNoEmbedder`. `Unload` drops the vectors **and** the metadata map (re-arming the deferred load) so a bursty index can hold no memory between uses — see "Session search" |
@@ -3207,7 +3210,9 @@ Two roots, resolved by [internal/paths/paths.go](internal/paths/paths.go):
   ├── permissions.json  # editor writes — user permission overrides
   ├── schedules.json    # durable /schedule routines (scheduler; loops not persisted)
   ├── collections.json  # ordered user-created session collections + colours + per-collection {squad,cwd} profiles (General is virtual)
-  ├── collections/      # per-collection context prose: <name>/instructions.md + memory.md (internal/collectionctx)
+  ├── collections/      # per collection: <name>/instructions.md (internal/collectionctx)
+  │                    #   + <name>/memory/<mem>.md, one file per memory (internal/collmem)
+  ├── general-memory/   # General's memories, <mem>.md (internal/collmem)
   ├── logs/             # agent_tasks_*, agent_todo_*, agent_memory_*,
   │   │                 #   agent_statelog_*, agent_events_*, conversation_*
   │   └── uploads/      # web UI file uploads (per-session)
@@ -3378,7 +3383,6 @@ mistaken for a broken reference.
 | `OMNIS_LLM_HTTP_TIMEOUT` | Total duration cap for a single LLM HTTP request — connection + reading the whole (possibly streamed) body (Go duration, default `15m`; `0` disables entirely, leaving only the stall guard + request context). Sits **above** `OMNIS_LLM_STREAM_STALL_TIMEOUT` (10m) so a genuinely frozen stream trips the stall guard first (clear message) rather than this raw client timeout. Raise it for slow backends whose generation intermittently blocks for minutes under load (e.g. a Scaleway-hosted model) — the previous hard 5-minute cap killed such legitimate long generations with `Client.Timeout … while reading body`. Both adapters ([core/llm/stall.go](core/llm/stall.go) `httpClientTimeout`, applied in [core/llm/openai.go](core/llm/openai.go) + [core/llm/anthropic.go](core/llm/anthropic.go)). |
 | `OMNIS_UPDATE_CHECK` | `true`/`false` (default `true`) — server-mode self-update poller that checks GitHub for a newer stable release. Auto-off for `dev` builds (no real version to compare). Overrides the `server.yaml` `update_check` setting; when the env var is unset, `update_check: false` in `server.yaml` disables the poller. See "Self-update". |
 | `OMNIS_UPDATE_INTERVAL` | How often the self-update poller re-checks GitHub (Go duration, default `6h`; clamped to ≥ `1m`). |
-| `OMNIS_COLLECTION_AUTOUPDATE_MIN_INTERVAL` | Minimum time between automatic memory distillations for one collection (Go duration, default `30m`). Gates the per-collection auto-update worker (see "Collection context") so a busy collection can't churn the model |
 
 ### Permission nomenclature (Claude Code-style) + grant scopes
 
@@ -3922,23 +3926,25 @@ scrolls the dialog's list to within ~5 rows of its end.
 A collection is no longer a pure UI folder — it can carry **persistent context
 that follows a workstream across repos**. Where AGENT.md (see "Project memory")
 scopes memory to a *working directory*, a collection scopes it to a *theme*: a
-hand-authored **instructions** block plus a **memory** block, injected into the
-answering root's system instruction for every session filed under the collection,
-plus **per-session defaults** (a seeded starting **squad** and **cwd**) applied to
-new chats. Everything is **per-session** — nothing crosses the generation
-boundary — so it composes with the existing squad/cwd machinery and needs no
-per-collection generations. Phase 1 is the deterministic hand-authored layer;
-Phase 2 adds an **assisted, user-initiated memory distiller** (below). Phase 3
-(a fully-automatic idle-triggered distiller) is now available as an **opt-in,
-per-collection auto-update worker** — off by default, gated behind a UI enable
-warning, and always keeping a revertable snapshot (see "Memory size + automatic
-updates" below).
+hand-authored **instructions** block plus the collection's **memory** (one file
+per fact, written by the agent during the turn — see "Collection memory" below),
+both injected into the root's system instruction for every session filed under
+the collection, plus **per-session defaults** (a seeded starting **squad** and
+**cwd**) applied to new chats. Everything is **per-session** — nothing crosses the
+generation boundary — so it composes with the existing squad/cwd machinery and
+needs no per-collection generations. (The collection's former single "Memory"
+text, its "Generate from recent chats" distiller, the `memory_size` /
+`auto_update` profile keys, the auto-update worker and the distill / revert
+routes are **removed**; a legacy `memory.md` is imported as a memory.)
 
 - **Storage split**: scalars in `collections.json` (a `profiles` map keyed by
-  canonical name, `{squad, cwd}`, beside `colors`), prose in files under
-  `$OMNIS_HOME/collections/<name>/{instructions.md,memory.md}`.
-  [internal/collectionctx/](internal/collectionctx/) owns the files (`Resolve`,
-  `Read/Write{Instructions,Memory}`, `HasContext`, `RenameDir`, `RemoveDir`); it
+  canonical name, `{squad, cwd}`, beside `colors`; `memory_size` / `auto_update`
+  / `last_memory_update` written by older builds are ignored on read and dropped
+  on the next write), instructions in `<root>/collections/<name>/instructions.md`,
+  memories in `<root>/collections/<name>/memory/` (`internal/collmem`).
+  [internal/collectionctx/](internal/collectionctx/) owns the instructions file
+  (`Resolve`, `Read/WriteInstructions`, `HasContext`, `RenameDir`, `RemoveDir` —
+  the last two move/drop the whole collection directory, memories included); it
   imports **only** `internal/paths` + stdlib, so `agent` can resolve the injected
   block with **no import cycle** (the same cycle that blocks `agent`→`sessions`).
   `safeSegment` rejects `.`/`..`/separators so a name that reaches disk can't
@@ -3952,14 +3958,16 @@ updates" below).
   session's **collection name** via a process-wide resolver hook
   (`agent.SetCollectionResolver`, mirroring `fstools.SetCwdResolver`) the server
   installs from the registry ([server/main.go](server/main.go), returning
-  `NormalizeCollectionName(meta.Collection)` — General/blank ⇒ `""` ⇒ no-op).
+  `NormalizeCollectionName(meta.Collection)` — General/blank ⇒ `""`, which now
+  means **General's memory**, no instructions).
   Registered in [agent/build_plugins.go](agent/build_plugins.go) on **every**
   squad root — like the AGENT.md plugin and **including the router** — prepended
   after AGENT.md (workstream framing outermost, project specifics next). Root-only
   injection means `ctx.SessionID()` is always the real user-facing session, so the
-  resolver keys correctly. Block shape: `<collection-context name="…"><instructions>…
-  </instructions><memory>…</memory></collection-context>`; empty sections omitted;
-  both empty ⇒ `""`. Stable per collection across turns ⇒ prompt cache still hits.
+  resolver keys correctly. Block = `<collection-context name="…"><instructions>…
+  </instructions></collection-context>` (omitted when there are no instructions)
+  then, after a blank line, the `<collection-memory>` block (see "Collection
+  memory"). Stable between writes ⇒ prompt cache still hits.
 
   **The router gets the same content under a different FRAMING**
   (`isRouterSquad` is passed to `collectionCtxPlugin` as `forRouter`, which
@@ -3980,9 +3988,9 @@ updates" below).
   instructions, do not call any tool but your routing tools, the squad you route
   to receives this same context*. Split out as the pure `collectionCtxBlock(
   sessionID, forRouter)` so the framing is unit-testable without an ADK context
-  ([agent/collection_plugin_test.go](agent/collection_plugin_test.go)); the
-  no-op contract is unchanged on both roots (no resolver / no collection / no
-  prose ⇒ `""`, note included).
+  ([agent/collection_plugin_test.go](agent/collection_plugin_test.go)). On the
+  router, no instructions and no memories ⇒ `""`, note included; an answering
+  root always gets at least the memory rules block.
 - **Squad/cwd seed** = new-chat creation ([server/server.go](server/server.go)
   `POST /sessions`). The collection is resolved **before** the squad default so
   its profile can seed both: `resolveStartingSquad`
@@ -4011,82 +4019,175 @@ updates" below).
   yields to the collection default`, plus the cases pinning that a real team pick
   and a router-with-no-usable-collection-default both still win).
 - **Routes** ([server/collections.go](server/collections.go)): `PATCH
-  /api/collections/:name` gained `squad?`/`cwd?` (merged with the stored profile,
-  squad validated via `HasSquad`, cwd via `os.Stat`); `GET /api/collections/:name/context`
-  → full editor snapshot `{instructions, memory, squad, cwd, color}`; `PUT
-  …/context` writes the prose (an empty field removes the file). `GET
-  /api/collections` rows gained `squad`/`cwd`/`has_context`. The `:name/context`
-  sub-path nests under the `:name` param (normal pattern) — no route-tree clash.
+  /api/collections/:name` takes `name?`/`color?`/`squad?`/`cwd?` (squad validated
+  via `HasSquad`, cwd via `os.Stat`; unknown keys from an older client ignored);
+  `GET /api/collections/:name/context` → editor snapshot `{name, instructions,
+  squad, cwd, color}`; `PUT …/context {instructions}` writes the instructions (an
+  empty string removes the file; an older client's `memory` key is ignored). `GET
+  /api/collections` rows carry `squad`/`cwd`/`has_context` (instructions only) and
+  `memories` (the count). The memories have their own routes (see "Collection
+  memory"). The `:name/context` sub-path nests under the `:name` param (normal
+  pattern) — no route-tree clash.
 - **Web UI** ([web/app.js](web/app.js)): the collection rail context menu gained
   **"Edit context…"** → `editCollectionContext` → `collectionContextDialog` (squad
-  `<select>` + cwd field + instructions/memory textareas, `.collection-ctx-modal`
-  in [web/css/features/dialogs.css](web/css/features/dialogs.css)); save = PATCH
-  (scalars) then PUT `…/context` (prose). i18n keys under `collections.*`
+  `<select>` + cwd field + instructions textarea + the memory list,
+  `.collection-ctx-modal` in [web/css/features/dialogs.css](web/css/features/dialogs.css));
+  Save = PATCH (scalars) then PUT `…/context` (instructions); memories are saved
+  one by one from the list, not by Save. i18n keys under `collections.*`
   (en/fr/es/de); "Squad" is kept untranslated per the glossary.
-- **Memory distiller (Phase 2, assisted + user-initiated)** — the memory block can
-  be **generated from the collection's own recent chats** instead of typed by hand.
-  `Manager.DistillCollectionMemory` ([agent/collection_memory.go](agent/collection_memory.go))
-  is the **same one-off-LLM pattern** as `EvaluateGoal` (eval model → leader
-  fallback via `evalModel`, no runner/tools/bus): given the current memory + the
-  gathered material it returns a **reconciled** memory (a strict "MERGE new durable
-  facts, **SUPERSEDE/remove** the obsolete, do NOT append, stay concise" prompt),
-  input- and output-capped (`collectionMaterialCap` / `collectionMemoryOutputCap`).
-  `buildDistillRequest` is extracted so the caps/prompt shape are unit-testable
-  without a live model. The server gathers material
-  ([server/collection_memory.go](server/collection_memory.go)
-  `gatherCollectionMaterial`: the collection's recent, non-hidden, non-empty
-  sessions, most-recent-first, **user+assistant turn text only** — mirroring the
-  session-search corpus — capped) and the route `POST
-  /api/collections/:name/memory/distill` returns `{proposed, current}` and
-  **deliberately does NOT write** `memory.md`. **Propose-then-commit is the
-  safeguard**: the web UI's **"Generate from recent chats"** button (in the memory
-  section of the context editor, [web/app.js](web/app.js) `collectionContextDialog`)
-  fills the *editable* memory field with the draft; it is saved only when the user
-  reviews it and clicks Save (PUT `…/context`). So an evolving memory can never
-  silently inject a stale/wrong fact into every new chat — the exact
-  "recalled-memory-that-is-wrong" hazard the codebase guards against elsewhere.
-  Degrades cleanly: `503` with no Manager, `400` when the collection has no chats
-  to learn from yet.
 - **Drafting assistant (web UI)** — the context editor embeds a small Helper chat
   ([web/app.js](web/app.js) `wireCollectionAssistant`) that helps the user *write*
-  the instructions and *adapt* the memory, mirroring the in-Settings assistant: a
+  the **instructions** (only — memories are not drafted there), mirroring the
+  in-Settings assistant: a
   **hidden, reusable Helper session** (`squad:"helper", hidden:true`, cached in
   `localStorage`, published as `window.__omnisCollectionAsstSessionId` so
   `subscribeGlobalEvents` skips its events), driven over `POST
   /api/sessions/:id/messages` + `parseSSE`. Each turn prepends a preamble naming
-  the collection + the **current field values** (so it adapts to unsaved edits)
-  and instructing the model to draft, not call tools, and wrap proposed text in
-  fenced ```instructions / ```memory blocks. The client extracts those blocks
-  (`extractCollectionDrafts`) and renders **Apply** buttons that fill the editable
-  textareas — **propose-then-commit** again: nothing is written until the user
+  the collection + the **current instructions** (so it adapts to unsaved edits)
+  and instructing the model to draft, not call tools, and wrap proposed text in a
+  fenced ```instructions block. The client extracts it
+  (`extractCollectionDrafts`) and renders an **Apply** button that fills the
+  editable textarea — **propose-then-commit**: nothing is written until the user
   reviews and clicks Save. The entry point is a **floating `.cc-field-asst`
-  button anchored inside EACH field textarea** (`attachFieldBtn` wraps the
-  textarea in a `position:relative` `.cc-ta-wrap` so the pill sits at the
-  textarea's bottom-right, clear of the label/"Generate" head/hint) rather than a
-  single generic header toggle — so the assistant's purpose reads off the field it
-  sits on; clicking a field's button opens the chat and, when the composer is
-  empty, seeds a per-field starter (`collections.asstStarter{Instr,Mem}`). The
+  button anchored inside the instructions textarea** (`attachFieldBtn` wraps the
+  textarea in a `position:relative` `.cc-ta-wrap` so the pill sits at its
+  bottom-right); clicking it opens the chat and, when the composer is empty, seeds
+  a starter (`collections.asstStarterInstr`). The
   modal splits into `[fields | chat]` (`.cc-split` / `.cc-asst`, closed via the
   assistant panel's own `.cc-asst-close`, in
   [web/css/features/dialogs.css](web/css/features/dialogs.css)); context resets per
   editor open (`reset_context` on the first send). No Go changes — it reuses the
   Helper squad and the existing message/SSE endpoints.
-- **Memory size + automatic updates** — a per-collection `memory_size` scalar
-  (small 200 / medium 350 / large 700 words, default medium) is a **soft target**
-  that bounds the distiller (`agent.SizeWordLimit`) and drives the editor
-  word-counter, but never truncates typed memory (injection stays size-unaware).
-  An opt-in **auto-update worker** ([server/collection_autoupdate.go](server/collection_autoupdate.go))
-  keeps a collection's memory current: enabled per collection via the `auto_update`
-  profile scalar (default off, enable-warning in the UI), rides `EventSessionIndexNow`,
-  gated by content-hash + `OMNIS_COLLECTION_AUTOUPDATE_MIN_INTERVAL` (default 30m),
-  auto-commits changes with a `memory.prev.md` snapshot, and the `POST
-  /api/collections/:name/memory/revert` route consumes the snapshot on revert or
-  manual memory save. This **wires the previously-"unwired by design" Phase 3**
-  with the safety net, so a collection can evolve its memory automatically without
-  losing the ability to roll back.
-- **No-op contract**: a collection with no profile + no prose is byte-identical to
-  before (resolver returns `""`, seed falls through to the router/default, plugin
-  is a no-op). CLI/TUI leave the resolver nil ⇒ no injection.
+- **No-op contract**: a collection with no profile, no instructions and no
+  memories injects only the memory rules block on an answering root (nothing on
+  the router); the seed falls through to the router/default. CLI/TUI leave the
+  resolver nil ⇒ General's memory, no instructions.
+
+### Collection memory (per-collection, written by the agent during the turn)
+
+Omnis's port of Claude Code's memory, scoped to the **collection**: the agent
+itself saves **one small typed file per fact**, **in the turn** where it learns
+it (a correction, a preference, "remember that…"), and the host puts what is
+known into **every turn** of every chat of that collection — nothing depends on
+the agent deciding to look it up. It replaces the collection's former single
+"Memory" text (see "Collection context"). Design:
+[docs/superpowers/specs/2026-11-09-collection-memory-design.md](docs/superpowers/specs/2026-11-09-collection-memory-design.md).
+Soft-skills still exist beside it on this branch (their removal is a later plan).
+
+- **Files** ([internal/collmem/](internal/collmem/), stdlib only):
+  `<root>/collections/<collection>/memory/<name>.md`, and for **General** (the
+  `""` collection) `<root>/general-memory/<name>.md` — "General" is not a valid
+  collection directory. `<root>` is `$OMNIS_HOME` (`paths.ConfigWriteDir()`), or
+  the owner's `$OMNIS_HOME/users/<login>/` in cookie mode (`collectionRoot` /
+  `userRoot`). Each file is front matter `name` / `description` / `type` /
+  `updated` (YYYY-MM-DD, stamped by `Save`) + a Markdown body. Rules enforced by
+  `Save`: name `^[a-z0-9][a-z0-9-]{0,63}$` (`NormalizeName` lower-cases, maps
+  space/`_` to `-`, strips `.md` — the ONLY way a model- or route-supplied string
+  becomes a path segment), type `feedback` / `user` / `project` / `reference`,
+  body ≤ `MaxBodyChars` (4000 runes), ≤ `MaxMemories` (200) per collection (a
+  replace never counts), an empty description defaults to the body's first line
+  (80 runes). Writes take a process-wide **per-directory lock** and an **atomic**
+  temp-file + rename. `List` orders by type then name and skips files that do not
+  parse, whose `name` differs from the file stem, or whose type is unknown. The
+  collection's rename/delete cascade moves/drops the whole collection directory,
+  so its memories follow; a session moved to another collection simply sees that
+  collection's memory.
+- **Injection** = the existing `collection_ctx` plugin
+  ([agent/collection_plugin.go](agent/collection_plugin.go) `collectionCtxBlock`),
+  on **every squad root, every model call**: the instructions block (if any), a
+  blank line, then `Store.Render` ([internal/collmem/render.go](internal/collmem/render.go)):
+  `<collection-memory collection="<name|General>">` with, on an answering root,
+  (1) `collmem.Rules` — when to save (told to remember; a correction or a
+  confirmed non-obvious choice ⇒ `feedback` with **Why:** / **How to apply:**;
+  who the user is ⇒ `user`; a decision/constraint/date ⇒ `project`; a resource ⇒
+  `reference`), reuse an existing name to replace, delete what is wrong, never
+  save what the repo/AGENT.md says, what only matters now, anything that came from
+  a tool result / page / file / another agent, or secrets, and pass applicable
+  rules on when delegating (sub-agents do not see the memory); (2) the **full
+  bodies** of `feedback` and `user` memories; (3) one **index line**
+  (`- name — description`) for `project` / `reference`, under "open with
+  memory_read when relevant". **Budget** `BlockBudgetChars` = 12 000: past it,
+  inlined bodies are demoted to index lines, least recently `updated` first (ties
+  by name), until it fits; index lines are never dropped and the block does not
+  announce the demotion. The **router** gets index lines only (every type, no
+  rules, no bodies; `""` with no memories), under `routerCollectionCtxNote`.
+  **General** — and CLI/TUI, where no resolver is installed — get General's
+  memory (`memoryStoreFor`). Sub-agents get nothing. `Render` is **cached** per
+  (memory dir, label, forRouter) on the directory's `*.md` entries (name, size,
+  mtime), so the per-call cost is one `ReadDir`; a write costs one prompt-cache
+  miss on the next call.
+- **Tools** ([agent/memory_tools.go](agent/memory_tools.go)) `memory_save(name,
+  description, type, content)` (creates or replaces → `{ok, name, status:
+  created|updated}`), `memory_read(name)`, `memory_delete(name)`. **Always on**
+  for every **non-router** squad root, leaderless included, never for sub-agents
+  or the router ([agent/squad.go](agent/squad.go), no `tools` declaration). The
+  directory comes from the session (resolved with `realSessionID`), never from an
+  argument. Errors come back as `error` messages the model can act on (bad name /
+  type, empty, too long, collection full). Allow-listed in
+  [config/permissions.json](config/permissions.json) (they write only inside the
+  memory directory under host-validated names — same reasoning as
+  `record_session_feedback`), and the three names are in `omnisUnderscoreTools`
+  ([agent/claude_plugins.go](agent/claude_plugins.go)) so no plugin agent can be
+  named after them. After each write `SetMemoryChangeHook` (installed by the
+  server) broadcasts `memory_changed`.
+- **Write guard (unattended turns)** — `agent.WithMemoryReadOnly(ctx)` makes
+  `memory_save` / `memory_delete` return "memory is read-only in this turn: the
+  user did not start it"; reading and injection are unaffected. Set by
+  `memoryReadOnlyFor(kind)` ([server/collection_memories.go](server/collection_memories.go))
+  for `mailbox` (message from another session), `a2a` (inbound A2A,
+  [server/a2a_server.go](server/a2a_server.go)) and `spawn_result` (a spawned
+  session's result delivered to its parent, [server/spawn.go](server/spawn.go)),
+  via `injectOpts.MemoryReadOnly` ([server/mailbox_push.go](server/mailbox_push.go)).
+  Interactive turns, `/loop` / `/schedule` runs, background-task notifications,
+  durable-question resumes and the spawned task itself keep write access (the
+  user authored their prompt). This is the host-side half of "only from the
+  user's own words"; the rules are the other half.
+- **Routes** ([server/collection_memories.go](server/collection_memories.go),
+  owner-scoped via `userRoot(requestLogin(c))`): `GET /api/collections/:name/memories`
+  → `{memories}`, `PUT …/memories/:mem` `{description, type, body}` →
+  `{memory, created}`, `DELETE …/memories/:mem` (404 when absent). `:name` is
+  `General` (any case) or one of the caller's collections (canonical name; unknown
+  ⇒ 404). Route writes broadcast `memory_changed` **owner-scoped** with no session
+  id (`broadcastOwnedData`); tool writes broadcast it **session-scoped**
+  (`broadcastData`, owner-filtered through the session). Payload `{collection
+  ("General" for ""), name, op}`. `GET /api/collections` rows carry `memories`.
+- **Migration of the old Memory text** — `Store.EnsureMigrated(collection)`
+  ([internal/collmem/migrate.go](internal/collmem/migrate.go)) converts a legacy
+  `<root>/collections/<name>/memory.md` into the memory `imported-notes` (type
+  `project`, description "Notes carried over from the previous collection
+  memory"; text over 4000 runes is split on paragraphs into `imported-notes-2`, …)
+  and removes `memory.md` and `memory.prev.md`. It runs only while the memory
+  directory does not exist, under its own per-directory lock, and logs + retries
+  on error (a partial import is rolled back). **GOTCHA — it must run before ANY
+  read or write of a named collection's memories**, because the first `Save`
+  creates the directory and from then on the legacy file is never imported (it
+  would sit there, invisible, forever). So it is called by the plugin on every
+  model turn (before any tool can run), by every memory route
+  (`memoryStoreForRequest`), and before the `memories` count in `GET
+  /api/collections` — which is also what makes the imported notes visible in the
+  dialog before the collection's first turn.
+- **Web UI** — the memory tools never render as tool blocks
+  ([web/memory-ui.js](web/memory-ui.js), [web/app.js](web/app.js)
+  `renderMemoryCall`): a successful save/delete is a **chip** ("Memory saved /
+  updated / deleted: *name*") whose click opens the memory view (`openMemoryView`:
+  type, description, body, **Edit** / **Delete**); a read shows nothing; a
+  failure shows the normal error tool block. Chips render live and on history
+  replay (from the persisted tool records — interactive turns only, like every
+  tool block). The environment panel's **Memory** card lists the focused
+  session's collection memories (hidden when there are none). Edit context
+  (`collectionContextDialog`) holds the **memory list** (`buildMemoryList`:
+  grouped by type, a row expands to an editor with a character counter, Save /
+  Delete per memory, **Add memory**); General's ⋯ menu → **Memory…** opens the
+  same dialog with the list only (`memoryOnly`), and **`/memory`** opens it for
+  the focused session's collection (`openCollectionMemory`; a draft/editor tab ⇒
+  General). `/memory` is reserved in
+  [internal/usercommands/](internal/usercommands/usercommands.go). Every view
+  follows `memory_changed` (`onMemoryChanged`); an editor with unsaved text defers
+  the refresh. Known limit: opening another row discards the open editor's
+  unsaved text without asking. i18n keys `chat.memory.*`, `memory.*`,
+  `env.memory.*`, `collections.memory*`.
+- **No-op contract**: a collection with no memories injects only the rules block
+  on answering roots and nothing on the router.
 
 ### Automatic session titling (Web UI)
 
@@ -5660,7 +5761,9 @@ events back **session collections** (see "Session collections"):
 create/rename/delete so open browsers re-fetch the rail + session list, and
 **`session_moved`** (session id + a `collection` `Data` payload) fires when a
 session is filed under a different collection so the rail counts + list filter
-stay in sync.
+stay in sync. **`memory_changed`** (`{collection, name, op}`, op =
+`created`/`updated`/`deleted`) fires on every collection-memory write so open
+Memory cards, memory views and memory lists refresh (see "Collection memory").
 
 ### Self-update (new-release detection + in-app install)
 
@@ -6168,11 +6271,11 @@ leading `Bearer ` stripped); `CommandValidator`
   single-user mode is unchanged. Server request/worker paths resolve the
   caller's (or session owner's) store via `collectionsFor`/`ctxStoreFor`
   ([server/identity_cookie.go](server/identity_cookie.go)); the rename/delete
-  cascade and the auto-update worker are scoped to the acting/owning user, so
+  cascade and the collection memory (`internal/collmem`, rooted at `userRoot`) are scoped to the acting/owning user, so
   one user editing their collections never touches another's. `agent.SetCollectionRootResolver`
   (installed only in cookie mode, [server/main.go](server/main.go)) is what
-  lets the `collection_ctx` plugin resolve a session's collection prose from
-  the right per-user root during a turn. **Legacy data in the shared root
+  lets the `collection_ctx` plugin and the memory tools resolve a session's
+  collection instructions and memory from the right per-user root during a turn. **Legacy data in the shared root
   (from before cookie mode, or from single-user use) is not migrated** — it is
   simply invisible to every cookie-mode login; sessions still stamped with the
   single-user default owner (`"web-user"`) map to `users/web-user/`.
@@ -7496,7 +7599,7 @@ back if the state flips mid-way; instant with `prefers-reduced-motion` or the
 panel not displayed). A card starts hidden and is shown unless its render says
 otherwise; an async render keeps the card as it is until it answers, so a card
 that ends up hidden is never flashed in. Cards: Environnement (squad, folder, git
-branch, collection), Contexte (`ctxUsageInfo`), Skills (from `sessionSkills`),
+branch, collection), Contexte (`ctxUsageInfo`), Skills (from `sessionSkills`), Memory (the session's collection memories, hidden when none — see "Collection memory"),
 Connecteurs (`GET /api/sessions/:id/mcp` — squad's MCP servers via
 `Manager.SquadMCPServers` + `mcp.Pool.Status()`, never connects), Résultats
 (`GET …/produced`; files a `Write` CREATED — `WriteOut.Created`, recorded in
@@ -7608,7 +7711,7 @@ stays organised as commands are added:
   **User commands** section (the per-user `user_commands.json` entries).
 - **Sorting** (`sortSlashSection`): the **`common` section is NOT alphabetical**
   — it follows the hand-curated `COMMON_ORDER` (`/help`, `/compress`, `/init`,
-  `/cost`, `/learn-now`, `/rollback`), i.e. the most-used commands first. **Every other section (and
+  `/cost`, `/memory`, `/learn-now`, `/rollback`), i.e. the most-used commands first. **Every other section (and
   the User-commands section) is sorted alphabetically** by command name. A
   `common` command missing from `COMMON_ORDER` sorts after the curated ones,
   alphabetically.

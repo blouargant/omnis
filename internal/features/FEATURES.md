@@ -17,6 +17,10 @@
     * English only (release notes follow the same policy as the docs).
 -->
 
+## 2.2 (in development) — Collection memory
+
+- **Collection memory** — Omnis remembers your corrections and preferences per collection and applies them in every later chat there.
+
 ## 2.1 (in development) — Collection tree and settings dialog
 
 - **Forks show under their conversation** — a forked conversation is listed in the sidebar right below the one it was copied from, with a connector line; a chevron after the original folds its forks away. A conversation's menu has a **Duplicate** entry that makes such a copy of the whole conversation.

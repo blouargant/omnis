@@ -81,12 +81,10 @@ topic) that a per-directory `AGENT.md` can't cover. Open a collection's
 - **Instructions** — hand-authored, stable guidance prepended to every chat in
   the collection (tone, stack, do/don't). This is an `AGENT.md` scoped to the
   collection instead of a folder.
-- **Memory** — facts about the workstream that persist across its chats (which
-  repos are involved, decisions taken, conventions). Type it yourself, or click
-  **Generate from recent chats** to have Omnis draft it from the collection's own
-  recent conversations. The draft only fills the (editable) field — nothing is
-  saved until you review it and click **Save**, so an out-of-date fact can never
-  slip into your chats unnoticed.
+- **Memory** — what Omnis has learned in this collection, one memory per fact
+  (see [Collection memory](#collection-memory) below). The list shows them
+  grouped by type; open one to edit or delete it, or **Add memory**. Each memory
+  is saved on its own — the dialog's **Save** button is for the other fields.
 - **Default squad** — new chats in the collection start on this squad instead of
   asking the router. It's a **hint, not a lock**: routing still runs, so a chat
   that drifts off-topic is handed back to the router automatically. Leave it on
@@ -96,15 +94,56 @@ topic) that a per-directory `AGENT.md` can't cover. Open a collection's
 
 Instructions and memory are injected into the assistant's context on every turn;
 the squad/folder defaults apply when you start a new chat while the collection is
-selected. Everything is stored under `$OMNIS_HOME/collections/<name>/` (prose)
-and `collections.json` (defaults), and follows the collection through renames.
-**General** has no context — it's the catch-all bucket.
+selected. Everything is stored under `$OMNIS_HOME/collections/<name>/`
+(instructions and memories) and `collections.json` (defaults), and follows the
+collection through renames. **General** has no instructions or defaults, but it
+has its own memory: its **⋯** menu → **Memory…**.
 
 If you're not sure what to write, click the **Assistant** button that floats in
-the corner of the **Instructions** or **Memory** box to open a chat that helps
-you draft that field. Describe your workstream and it proposes text with **Apply
-to instructions** / **Apply to memory** buttons that drop the draft into the
-field — you still review and **Save**, so nothing changes until you approve it.
+the corner of the **Instructions** box to open a chat that helps you draft them.
+Describe your workstream and it proposes text with an **Apply to instructions**
+button that drops the draft into the field — you still review and **Save**, so
+nothing changes until you approve it.
+
+### Collection memory
+
+Tell Omnis something once in a collection and it applies it in every later chat
+of that collection. The agent saves a memory itself, **in the turn**, when you:
+
+- ask it to remember something;
+- correct how it works or what it produced, or confirm a choice it made;
+- tell it who you are or a lasting preference;
+- state a decision, constraint or date of the workstream;
+- point it to a resource to use from now on.
+
+When a memory covers the same subject it is updated rather than duplicated, and
+when you say to forget something it is deleted. Each save or delete shows as a
+small chip in the conversation — **Memory saved: *name*** — click it to read,
+edit or delete that memory. The environment panel's **Memory** card lists the
+current collection's memories, and **`/memory`** opens the current collection's
+memory list (in its **Edit context** dialog; for General, the memory list alone).
+
+There are four types: **Feedback** (how you want the work done) and **User**
+(who you are, your preferences) are given to the agent in full on every turn;
+**Project** (decisions, constraints, dates) and **Reference** (links, where
+things live) are listed by name and description, and the agent opens the ones it
+needs. A memory is at most 4,000 characters, and a collection holds at most 200.
+
+Good to know:
+
+- Memory belongs to the **collection**: a chat moved to another collection sees
+  that collection's memory. Chats in **General** share General's memory.
+- The agent only saves from **your own words** — not from a web page, a file, a
+  tool's output or another agent. In turns you did not start (a message from
+  another session, an inbound A2A call, the result of a spawned session) the
+  memory can be read but not changed.
+- Sub-agents don't see the memory: the leader passes on what applies when it
+  delegates.
+- Memories are files under `$OMNIS_HOME/collections/<name>/memory/` (General:
+  `$OMNIS_HOME/general-memory/`). A collection's former single **Memory** text
+  is imported once as a memory named `imported-notes`.
+- In the dialog's memory list, opening another memory discards unsaved changes
+  to the one being edited.
 
 ## Session list affordances
 
