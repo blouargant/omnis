@@ -8,13 +8,13 @@ import (
 	"testing"
 )
 
+// softSkillRE matches every spelling: softskill, soft-skill, soft skill.
+var softSkillRE = regexp.MustCompile(`(?i)soft[- ]?skill`)
+
 // TestShippedAgentsDeclareNoSoftskills guards the removal of soft-skills: no
 // shipped agent may still declare the (now inert) "softskills" tool group or a
 // softskills_dir, and no shipped instruction may tell the model to load a
 // soft-skill that no longer exists.
-// softSkillRE matches every spelling: softskill, soft-skill, soft skill.
-var softSkillRE = regexp.MustCompile(`(?i)soft[- ]?skill`)
-
 func TestShippedAgentsDeclareNoSoftskills(t *testing.T) {
 	for _, name := range shippedAgentNames(t) {
 		data := readShippedAgentJSON(t, name)

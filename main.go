@@ -149,6 +149,11 @@ func run(ctx context.Context, opts options, args []string) error {
 			return runImportAgent(args[1:])
 		case "permissions":
 			return runPermissions(args[1:])
+		case "curate", "reindex-precedents":
+			// Removed with soft-skills. Refuse them explicitly: falling
+			// through would read the words as a prompt and spend a real
+			// model call on them.
+			return fmt.Errorf("%q was removed with soft-skills", "omnis "+strings.ToLower(args[0]))
 		}
 	}
 	return runCLI(ctx, opts, args)

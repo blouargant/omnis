@@ -361,7 +361,7 @@ func (b *Bus) PluginWithOptions(name string, opts PluginOptions) (*plugin.Plugin
 			"session_id": s.ID(),
 			// ADK's InvocationID is stable across BeforeRun + AfterRun
 			// for a single Runner.Run call, so we use it as the run_id
-			// that Phase 6's subagent_hook keys its per-turn buffer on.
+			// that groups one turn's events.
 			"run_id": ctx.InvocationID(),
 		})
 		return nil, nil

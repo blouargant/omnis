@@ -54,8 +54,9 @@ func loadedSkillFromResponse(agent, tool string, resp map[string]any) (sessions.
 }
 
 // isSystemSkill reports whether a skill's frontmatter marks it as a system
-// skill (`metadata: {system: "true"}`). System skills are plumbing, not something the user chose to
-// engage, so they are never listed in the composer skills dock.
+// skill (`metadata: {system: "true"}`). System skills are plumbing, not
+// something the user chose to engage, so they are never listed in the
+// composer skills dock.
 func isSystemSkill(fm map[string]any) bool {
 	md, ok := fm["metadata"].(map[string]any)
 	if !ok {

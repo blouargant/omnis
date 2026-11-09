@@ -1873,7 +1873,7 @@ async function refreshGoal(sessionId) {
 }
 
 // ─── Subtle ask-user indicator ───────────────────────────────────────────────
-// An optional question (AskUserQuestion with subtle=true — the wrap-session
+// An optional question (AskUserQuestion with subtle=true — e.g. an optional
 // check) is not shown as the ask-user card: a small "?" disc pulses in the
 // composer toolbar, and clicking it opens a popover to answer or skip. The disc
 // goes away when the question is answered, skipped, or resolved server-side

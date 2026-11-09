@@ -21,9 +21,10 @@ func logsDir() string { return paths.LogsDir() }
 // convLocks serialises read-modify-write access to each session's conversation
 // file. Every mutator below loads the file, edits it, and writes it back;
 // without a per-session lock two goroutines (a user turn, a background mailbox
-// push, the idle indexer, async title generation) can interleave their load/save — losing each other's updates or,
-// worse, reading a half-written file and treating it as corrupt. Keyed by
-// sessionID so unrelated sessions never contend.
+// push, the idle indexer, async title generation) can interleave their
+// load/save — losing each other's updates or, worse, reading a half-written
+// file and treating it as corrupt. Keyed by sessionID so unrelated sessions
+// never contend.
 var convLocks sync.Map // sessionID -> *sync.Mutex
 
 func convLock(sessionID string) *sync.Mutex {
@@ -381,9 +382,9 @@ func AppendConversationTurnRecord(sessionID, userText, assistantText string, usa
 }
 
 // TruncateConversationTurns rewinds a session's history to its first `keep`
-// turns, dropping everything after. `keep` is clamped to
-// [0, len(turns)], so a keep ≥ len is a no-op and a negative keep empties the
-// history. Returns the kept turns. The write is atomic (see SaveConversationFile).
+// turns, dropping everything after. `keep` is clamped to [0, len(turns)], so a
+// keep ≥ len is a no-op and a negative keep empties the history. Returns the
+// kept turns. The write is atomic (see SaveConversationFile).
 func TruncateConversationTurns(sessionID string, keep int) ([]ConversationTurn, error) {
 	var kept []ConversationTurn
 	err := mutateConversation(sessionID, func(f *ConversationFile) {

@@ -62,7 +62,7 @@ type Question struct {
 	// cards gate one tool call that does not exist after a restart.
 	Durable bool `json:"durable,omitempty"`
 	// Subtle is a display hint for an optional question the user may ignore
-	// (the wrap-up check): the web UI shows a discreet composer indicator
+	// (e.g. an optional check): the web UI shows a discreet composer indicator
 	// instead of the ask-user card. Resolution is unchanged.
 	Subtle bool `json:"subtle,omitempty"`
 	// Agent is the agent that asked the question (used to resume after a restart).

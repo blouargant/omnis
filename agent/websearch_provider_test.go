@@ -62,9 +62,7 @@ func TestToolsForAgentConfig_WebSearchProviderPrecedence(t *testing.T) {
 				nil,      // skillTS
 				nil, nil, // leaderMCPHandles, pool
 				nil, nil, nil, nil, // codeIdx, regIdx, docIdx, sessIdx
-				nil,  // attestStore
-				true, // asLeader
-				nil,  // emb
+				nil, // attestStore
 			)
 
 			ws := webSearchTools(tools)

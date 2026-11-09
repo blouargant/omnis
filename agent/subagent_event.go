@@ -4,9 +4,9 @@
 // Background: sub-agents wrapped via agenttool spawn their own internal
 // runner, which does NOT carry the bus's runner-level plugin, so the
 // only run boundary the bus actually observes is the leader's tool call.
-// Re-emitting it under sub-agent-specific names lets reflection hooks
-// subscribe to "a sub-agent invocation finished" cleanly, without having
-// to filter every after_tool event by tool name.
+// Re-emitting it under sub-agent-specific names lets lifecycle
+// SubagentStop hooks subscribe to "a sub-agent invocation finished"
+// cleanly, without having to filter every after_tool event by tool name.
 
 package agent
 

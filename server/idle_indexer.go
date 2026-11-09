@@ -78,8 +78,8 @@ func scanStaleSessions(cfg IdleIndexerConfig) {
 }
 
 // indexSession marks a session Indexed and emits EventSessionIndexNow so the
-// session-search hook re-indexes the conversation. Shared by the idle scanner and the
-// archive handler.
+// session-search hook re-indexes the conversation. Shared by the idle scanner
+// and the archive handler.
 func indexSession(registry *sessions.Registry, bus *events.Bus, userID, sessionID string) {
 	if bus == nil || sessionID == "" {
 		return

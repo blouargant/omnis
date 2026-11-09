@@ -29,10 +29,10 @@ func TestLoadedSkillFromResponse(t *testing.T) {
 
 func TestSystemSkillIsNotRecorded(t *testing.T) {
 	resp := map[string]any{
-		"skill_name":   "wrap-session",
-		"instructions": "# Wrap Session",
+		"skill_name":   "system-plumbing",
+		"instructions": "# System Plumbing",
 		"frontmatter": map[string]any{
-			"name":     "wrap-session",
+			"name":     "system-plumbing",
 			"metadata": map[string]any{"system": "true"},
 		},
 	}

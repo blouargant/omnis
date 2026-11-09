@@ -26,7 +26,7 @@ type askUserIn struct {
 	Default string `json:"default,omitempty"`
 	// TimeoutSeconds overrides the default per-question timeout (0 = registry default).
 	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
-	// Subtle marks an optional question the user may ignore (e.g. a wrap-up
+	// Subtle marks an optional question the user may ignore (e.g. an optional
 	// check): surfaces show it discreetly instead of as a blocking card.
 	Subtle bool `json:"subtle,omitempty"`
 }

@@ -142,7 +142,6 @@ func buildSquadInstance(
 		return nil, err
 	}
 
-	emb := infra.Embedder(ctx, runtime)
 	// buildLeaderToolsets resolves the root's skill/MCP toolsets and
 	// acquires its MCP handles (also handed to sub-agents). Its aggregated
 	// toolset slice is intentionally discarded: the root's tools are assembled
@@ -163,7 +162,7 @@ func buildSquadInstance(
 	// ── Root capability tools — config-driven from rootCfg.Tools ──
 	capTools, capToolsets, capInstruction, capHandles := toolsForAgentConfig(
 		ctx, rootCfg, runtime, skillTS, leaderHandles,
-		infra.MCPPool, codeIdx, regIdx, docIdx, sessIdx, infra.Attest, !leaderless, emb)
+		infra.MCPPool, codeIdx, regIdx, docIdx, sessIdx, infra.Attest)
 	allMCPHandles = append(allMCPHandles, capHandles...)
 
 	leadTools := append([]tool.Tool{}, capTools...)
@@ -477,7 +476,7 @@ func buildSquadInstance(
 	// members: a nested gatherer (reachable only through another agent's
 	// `subagents`) is invoked exactly like a member, so it must be in this set or
 	// registerSubAgentEvents would never re-emit EventSubAgentStart/End for it and
-	// the reflection pipeline would be blind to the calls. Members first (declared
+	// SubagentStop hooks would never fire for its calls. Members first (declared
 	// order), then the nested-only agents, sorted for determinism.
 	subAgentNames := make([]string, 0, len(subAgentMap))
 	listed := make(map[string]bool, len(subAgentMap))

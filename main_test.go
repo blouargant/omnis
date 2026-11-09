@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+)
 
 func TestParseFlagsDebugShort(t *testing.T) {
 	opts, args, err := parseFlags([]string{"-d", "tui"})
@@ -61,5 +65,26 @@ func TestRemovedFlagsAreAccepted(t *testing.T) {
 	}
 	if len(args) != 1 || args[0] != "tui" {
 		t.Fatalf("args = %#v, want [tui]", args)
+	}
+}
+
+// "curate" and "reindex-precedents" were removed with soft-skills. They must
+// fail fast, before any config or model work, rather than being read as a
+// prompt and spending a real model call.
+func TestRemovedSubcommandsFailFast(t *testing.T) {
+	t.Setenv("OMNIS_CONFIG_PATH", "/nonexistent/agents.json")
+	for _, args := range [][]string{
+		{"curate", "--user", "u", "--session", "s"},
+		{"reindex-precedents"},
+		{"CURATE"},
+	} {
+		err := run(context.Background(), options{configPath: "/nonexistent/agents.json"}, args)
+		if err == nil {
+			t.Fatalf("run(%v) = nil, want an error", args)
+		}
+		want := "\"omnis " + strings.ToLower(args[0]) + "\" was removed with soft-skills"
+		if err.Error() != want {
+			t.Fatalf("run(%v) error = %q, want %q", args, err.Error(), want)
+		}
 	}
 }

@@ -22,7 +22,6 @@ import (
 	"google.golang.org/adk/v2/tool"
 	"gopkg.in/yaml.v3"
 
-	"github.com/blouargant/omnis/core/embed"
 	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/core/llm"
 	fstools "github.com/blouargant/omnis/core/tools"
@@ -213,11 +212,7 @@ type sessionIndexFn func() *sessindex.Index
 // groups. It is shared by sub-agents and by squad roots (both coordinating
 // leaders and leaderless single-agent squads), so a root agent is limited to
 // exactly the capability groups it declares.
-//
-// asLeader marks the coordinating-leader case and emb is the process-wide
-// embedder; neither changes the tool set today (they carried the leader's
-// soft-skill recall, now removed).
-func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime RuntimeSettings, skillTS tool.Toolset, leaderMCPHandles []*mcpcfg.Handle, pool *mcpcfg.Pool, codeIdx *codeindex.Index, regIdx *regindex.Index, docIdx *docindex.Index, sessIdx sessionIndexFn, attestStore *attest.Store, asLeader bool, emb embed.Embedder) ([]tool.Tool, []tool.Toolset, string, []*mcpcfg.Handle) {
+func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime RuntimeSettings, skillTS tool.Toolset, leaderMCPHandles []*mcpcfg.Handle, pool *mcpcfg.Pool, codeIdx *codeindex.Index, regIdx *regindex.Index, docIdx *docindex.Index, sessIdx sessionIndexFn, attestStore *attest.Store) ([]tool.Tool, []tool.Toolset, string, []*mcpcfg.Handle) {
 	keys := cfg.Tools
 	if keys == nil {
 		keys = defaultToolKeys(cfg.Name)

@@ -22,8 +22,9 @@ import (
 )
 
 // buildSubAgents constructs every enabled sub-agent (skipping the leader)
-// declared in the runtime config. Equivalent to
-// buildSubAgentsFromConfigs called with every non-leader enabled agent. Kept for any callers that want the full default behaviour.
+// declared in the runtime config. Equivalent to buildSubAgentsFromConfigs
+// called with every non-leader enabled agent. Kept for any callers that want
+// the full default behaviour.
 func buildSubAgents(
 	ctx context.Context,
 	runtime RuntimeSettings,
@@ -149,7 +150,7 @@ func buildSubAgentsFromConfigs(
 			instr = defaultAgentInstruction(cfg.Name)
 		}
 
-		subTools, subToolsets, extraInstr, subHandles := toolsForAgentConfig(ctx, cfg, runtime, skillTS, leaderMCPHandles, pool, codeIdx, regIdx, docIdx, sessIdx, attestStore, false, nil)
+		subTools, subToolsets, extraInstr, subHandles := toolsForAgentConfig(ctx, cfg, runtime, skillTS, leaderMCPHandles, pool, codeIdx, regIdx, docIdx, sessIdx, attestStore)
 		mcpHandles = append(mcpHandles, subHandles...)
 		instr = extraInstr + instr
 		subTools = applyReadOnly(cfg, subTools, subToolsets)

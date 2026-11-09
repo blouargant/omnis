@@ -20,7 +20,7 @@ func TestSoftskillsToolGroupIsIgnored(t *testing.T) {
 		context.Background(),
 		RuntimeAgentConfig{Name: "probe", Tools: []string{"fs", "softskills"}},
 		RuntimeSettings{},
-		nil, nil, nil, nil, nil, nil, nil, nil, true, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil,
 	)
 	if len(toolsets) != 0 {
 		t.Fatalf("the softskills key mounted %d toolset(s), want none", len(toolsets))

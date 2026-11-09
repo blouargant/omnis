@@ -8,8 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/blouargant/omnis/internal/budget"
@@ -555,6 +557,42 @@ var removedAgentNames = map[string]bool{"curator": true, "reflector": true}
 
 func isRemovedAgent(name string) bool {
 	return removedAgentNames[strings.ToLower(strings.TrimSpace(name))]
+}
+
+// removedAgentsLog remembers the last set of removed agent names logged, so
+// the notice is printed once per distinct set rather than on every resolution
+// (each reload, plugin listing and parsed-config GET resolves the settings).
+var removedAgentsLog struct {
+	mu   sync.Mutex
+	last string
+}
+
+// logRemovedAgents logs the removed agent names found in the config, each once
+// and sorted, and only when that set differs from the last one logged.
+func logRemovedAgents(dropped []string) {
+	if len(dropped) == 0 {
+		return
+	}
+	seen := make(map[string]bool, len(dropped))
+	names := make([]string, 0, len(dropped))
+	for _, n := range dropped {
+		if n != "" && !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	sort.Strings(names)
+	key := strings.Join(names, ",")
+	removedAgentsLog.mu.Lock()
+	defer removedAgentsLog.mu.Unlock()
+	if key == removedAgentsLog.last {
+		return
+	}
+	removedAgentsLog.last = key
+	log.Printf("config: ignoring removed agents %v (soft-skills were removed)", names)
 }
 
 // dropRemovedAgents strips the removed agent names from the agents list and
@@ -1416,9 +1454,7 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	if strings.TrimSpace(cfg.EvalModelRef) != "" {
 		out.EvalModelRef = strings.ToLower(strings.TrimSpace(cfg.EvalModelRef))
 	}
-	if dropped := dropRemovedAgents(&cfg); len(dropped) > 0 {
-		log.Printf("config: ignoring removed agents %v (soft-skills were removed)", dropped)
-	}
+	logRemovedAgents(dropRemovedAgents(&cfg))
 	if len(cfg.Agents) > 0 {
 		agentsRegistryDirs := paths.AgentsRegistrySearchDirs()
 		entries := make([]AgentEntry, 0, len(cfg.Agents))

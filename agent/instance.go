@@ -192,9 +192,9 @@ func BuildInstance(ctx context.Context, infra *Infrastructure, opts Options, gen
 
 	// Sub-agent boundary synthesises EventSubAgentStart / EventSubAgentEnd
 	// from the leader's before_tool / after_tool / tool_error payloads
-	// whose `tool` matches a sub-agent name. Reflection hooks subscribe to
-	// these high-level events (lifecycle SubagentStop hooks) instead of
-	// filtering every after_tool.
+	// whose `tool` matches a sub-agent name. Lifecycle SubagentStop hooks
+	// subscribe to these high-level events instead of filtering every
+	// after_tool.
 	if len(subAgentNamesAll) > 0 {
 		subs := registerSubAgentBoundary(infra.Bus, subAgentNamesAll)
 		for _, sub := range subs {

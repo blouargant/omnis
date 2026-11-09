@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -844,5 +846,53 @@ func TestCuratorEnvIsIgnored(t *testing.T) {
 	}
 	if _, ok := runtime.AgentConfig("curator"); ok {
 		t.Fatal("curator agent was re-added by the env/options")
+	}
+}
+
+// The removed-agents notice must not repeat on every resolution (each reload,
+// plugin listing and parsed-config GET resolves the settings), and must name
+// each removed agent once even when the config lists it in several places.
+func TestRemovedAgentsNoticeIsLoggedOnceAndDeduplicated(t *testing.T) {
+	dir := t.TempDir()
+	setupAgentsRegistry(t, dir, []AgentEntry{
+		{Name: "leader"},
+		{Name: "investigator"},
+	})
+	cfgPath := filepath.Join(dir, "agent.json")
+	mustWrite(t, cfgPath, []byte(`{
+  "agents": ["leader", "investigator", "reflector", "curator"],
+  "squads": [{"name": "system", "leader": "leader", "members": ["investigator", "curator", "reflector"]}]
+}`))
+
+	removedAgentsLog.mu.Lock()
+	removedAgentsLog.last = ""
+	removedAgentsLog.mu.Unlock()
+
+	var buf bytes.Buffer
+	prevOut, prevFlags := log.Writer(), log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(prevOut)
+		log.SetFlags(prevFlags)
+	})
+
+	for i := 0; i < 2; i++ {
+		if _, err := ResolveRuntimeSettings(Options{ConfigPath: cfgPath, ConfigPathStrict: true}); err != nil {
+			t.Fatalf("ResolveRuntimeSettings() #%d error = %v", i+1, err)
+		}
+	}
+
+	var notices []string
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if strings.Contains(line, "ignoring removed agents") {
+			notices = append(notices, line)
+		}
+	}
+	if len(notices) != 1 {
+		t.Fatalf("removed-agents notice logged %d times, want 1:\n%s", len(notices), buf.String())
+	}
+	if !strings.Contains(notices[0], "[curator reflector]") {
+		t.Fatalf("notice = %q, want each name once and sorted: [curator reflector]", notices[0])
 	}
 }
