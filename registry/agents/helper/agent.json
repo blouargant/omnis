@@ -7,7 +7,6 @@
   "model_ref": "balanced",
   "name": "helper",
   "skills": null,
-  "softskills_dir": "",
   "tools": [
     "docs",
     "registries",

@@ -10,7 +10,6 @@
     "k8s-modification",
     "k8s-triage"
   ],
-  "softskills_dir": "",
   "subagents": ["k8s_validator"],
   "tools": [
     "Bash",
@@ -23,7 +22,6 @@
     "revert",
     "mime",
     "mcp",
-    "softskills",
     "calc"
   ]
 }

@@ -10,7 +10,6 @@
     "ask-user",
     "skill-creator"
   ],
-  "softskills_dir": "",
   "tools": [
     "Bash",
     "Read",
@@ -21,7 +20,6 @@
     "Skill",
     "revert",
     "mime",
-    "softskills",
     "calc",
     "planning",
     "worktree",

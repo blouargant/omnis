@@ -9,7 +9,6 @@
   "name": "investigator",
   "read_only": true,
   "skills": [],
-  "softskills_dir": "",
   "tools": [
     "Bash",
     "Read",
@@ -21,7 +20,6 @@
     "revert",
     "mime",
     "mcp",
-    "softskills",
     "calc",
     "code_search"
   ]

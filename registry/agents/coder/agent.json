@@ -6,10 +6,8 @@
   "model_ref": "premium",
   "name": "coder",
   "skills": [],
-  "softskills_dir": "",
   "tools": [
     "fs",
-    "softskills",
     "planning",
     "worktree",
     "bg",

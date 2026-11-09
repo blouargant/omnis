@@ -53,7 +53,7 @@ the user — it is not auto-cancelled on a timer.
 
 Before calling `AskUserQuestion`, run these checks:
 1. **Scan conversation history** — did the user already answer this implicitly?
-2. **Check stated preferences** — does a loaded skill or softskill supply a default?
+2. **Check stated preferences** — does a loaded skill supply a default?
 3. **Estimate cost of a wrong default** — if low, pick the safest default and note it.
 
 Only gate when the three checks leave the answer genuinely ambiguous.

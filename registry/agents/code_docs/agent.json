@@ -7,12 +7,10 @@
   "name": "code_docs",
   "max_tool_calls_per_call": 20,
   "skills": null,
-  "softskills_dir": "",
   "max_instances": 5,
   "tools": [
     "serper",
     "ddg",
-    "web",
-    "softskills"
+    "web"
   ]
 }

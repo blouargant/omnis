@@ -7,10 +7,8 @@
   "model_ref": "imagegen",
   "name": "image_generator",
   "skills": null,
-  "softskills_dir": "",
   "tools": [
     "Skill",
-    "mcp",
-    "softskills"
+    "mcp"
   ]
 }
