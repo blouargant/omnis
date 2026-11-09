@@ -290,45 +290,26 @@
 }
 .collection-ctx-modal .cc-grow-instr,
 .collection-ctx-modal .cc-grow-mem { min-height: 0; }
-.collection-ctx-modal .cc-grow-instr { flex: 3 1 0; }
-.collection-ctx-modal .cc-grow-mem { flex: 2 1 0; }
-/* Each editor textarea sits in a relative wrap so its floating Assistant button
-   anchors to the textarea's own bottom-right, clear of the field's label /
-   "Generate" head / hint. The wrap takes the field's flex slack; the textarea
-   fills the wrap. */
+.collection-ctx-modal .cc-grow-instr { flex: 1 1 0; }
+.collection-ctx-modal .cc-grow-mem { flex: 1 1 0; }
+/* The instructions textarea sits in a relative wrap so its floating Assistant
+   button anchors to the textarea's own bottom-right, clear of the field's label.
+   The wrap takes the field's flex slack; the textarea fills the wrap. */
 .collection-ctx-modal .cc-ta-wrap {
   position: relative;
   flex: 1 1 0;
   min-height: 72px;
   display: flex;
 }
-.collection-ctx-modal .cc-instr,
-.collection-ctx-modal .cc-mem {
+.collection-ctx-modal .cc-instr {
   flex: 1 1 0;
   min-height: 0;
   width: 100%;
   overflow-y: auto;
   resize: none;
 }
-/* The memory textarea + its controls bar are stacked flush (no gap) inside one
-   wrapper that takes the field's slack; the textarea grows, the bar is fixed. */
-.collection-ctx-modal .cc-mem-editor {
-  flex: 1 1 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-/* The textarea drops its bottom border + bottom corners so the controls bar
-   below (.cc-mem-controls) reads as its continuation. */
-.collection-ctx-modal .cc-mem {
-  border-bottom: none;
-  border-radius: 4px 4px 0 0;
-}
-/* …but when it's focused we restore an accent bottom line so the selected
-   textarea shows a complete outline (border-box ⇒ no layout shift of the bar). */
-.collection-ctx-modal .cc-mem:focus {
-  border-bottom: 1px solid var(--accent, #0e639c);
-}
+/* General's dialog holds the memory list alone: a smaller window. */
+.collection-ctx-modal.cc-memory-only { width: min(640px, 95vw); height: 70vh; }
 /* Floating per-field entry point to the drafting assistant, anchored inside the
    textarea (bottom-right). Subtle until hovered/active so it never fights the
    text underneath. */
@@ -364,7 +345,7 @@
   justify-content: space-between;
   gap: 8px;
 }
-.cc-mem-gen {
+.cc-mem-add {
   font-size: 11px;
   padding: 3px 8px;
   border: 1px solid var(--border);
@@ -373,56 +354,76 @@
   color: var(--text);
   cursor: pointer;
 }
-.cc-mem-gen:hover:not(:disabled) { border-color: var(--accent, #0e639c); }
-.cc-mem-gen:disabled { opacity: 0.6; cursor: default; }
+.cc-mem-add:hover { border-color: var(--accent, #0e639c); }
 
-/* Memory-size radios + auto-update toggle, as a bar that sits flush UNDER the
-   memory textarea (inside .cc-mem-editor). It shares the textarea's background +
-   border with no top border and flat top corners, so it reads as a continuation
-   of the textarea (which drops its own bottom border + corners to match). */
-.cc-mem-controls {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  font-size: 12px;
-  padding: 6px 8px;
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-top: none;
-  border-radius: 0 0 4px 4px;
-}
-.cc-size-row { display: inline-flex; align-items: center; gap: 10px; }
-.cc-size-caption { color: var(--text-muted); }
-.cc-size-radio { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
-.cc-autoupdate { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
-.cc-autoupdate span { cursor: help; }
-.cc-mem-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 11px;
-  min-height: 16px;
-}
-.cc-word-count { color: var(--text-muted); }
-.cc-word-count.over { color: var(--warn-fg, #c9821f); font-weight: 600; }
-.cc-revert-marker { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
-.cc-revert-btn {
-  font-size: 11px;
-  padding: 1px 7px;
+/* The collection's memories, grouped by type: one row per memory (name +
+   description), expanding to an inline editor. The list scrolls on its own
+   inside the field's flex slack. */
+.cc-mem-list {
+  flex: 1 1 0;
+  min-height: 72px;
+  overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg-raised);
+  padding: 4px 0;
+}
+.cc-mem-empty { padding: 10px 12px; color: var(--text-muted); font-size: 12px; }
+.cc-mem-group {
+  padding: 8px 12px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.cc-mem-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 5px 12px;
+  border: none;
+  background: transparent;
   color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
   cursor: pointer;
 }
-.cc-revert-btn:hover { border-color: var(--accent, #0e639c); }
+.cc-mem-row-head:hover,
+.cc-mem-row.is-open .cc-mem-row-head { background: var(--accent-bg-soft); }
+.cc-mem-row-name { flex: 0 0 auto; font-weight: 500; }
+.cc-mem-row-desc {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cc-mem-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.cc-mem-editor-row { display: flex; gap: 10px; align-items: flex-start; }
+.cc-mem-editor-row .cc-mem-desc-field { flex: 1 1 0; min-width: 0; }
+.cc-mem-editor .cc-mem-body { min-height: 120px; }
+.cc-mem-editor-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.cc-mem-count { color: var(--text-muted); }
+.cc-mem-count.over { color: var(--warn-fg, #c9821f); font-weight: 600; }
+.cc-mem-error { flex: 1 1 auto; min-width: 0; color: var(--danger-fg); }
 
 /* A field title with its leading "?" help button on one row (Instructions /
-   Memory). Keeps the badge and the label together so the Memory row's "Generate"
+   Memory). Keeps the badge and the label together so the Memory row's "Add memory"
    button still sits at the far right of its space-between head. */
 .cc-label-row {
   display: inline-flex;

@@ -2076,6 +2076,7 @@ function onMemoryChanged(data) {
   memoriesCache.delete(key);
   if (window.EnvPanel) EnvPanel.refresh("memory");
   if (memoryDialog && memoryCollectionKey(memoryDialog.collection) === key) memoryDialog.refresh();
+  for (const v of memoryListViews) if (memoryCollectionKey(v.collection) === key) v.refresh();
 }
 
 // appendMemoryChip renders the transcript chip for a successful save / delete.
@@ -7638,15 +7639,18 @@ async function fetchSessionMeta(id) {
   return null;
 }
 
-// openCollectionCtxMenu offers Rename / Change colour / Delete for a user
-// collection, reusing the themed context-menu renderer shared with the
-// Folders/session menus.
+// openCollectionCtxMenu offers Edit context / Rename / Change colour / Delete
+// for a user collection, reusing the themed context-menu renderer shared with
+// the Folders/session menus. General offers its memories and Select.
 function openCollectionCtxMenu(ev, c) {
   // "Select" enters bulk select on this group; it is unavailable while searching
-  // (search and select are mutually exclusive). General is fixed, so Select is
-  // all its menu offers.
+  // (search and select are mutually exclusive). General is fixed: it has no
+  // context to edit, only its memories.
   const select = [tr("sessionbar.select"), () => enterSelectMode(c.name), { icon: ICON_CHECK_SQUARE, disabled: !!sessionSearch }];
-  if (c.general) { showFolderCtxMenu(ev, [select]); return; }
+  if (c.general) {
+    showFolderCtxMenu(ev, [[tr("collections.memoryMenu"), () => openCollectionMemory(GENERAL_COLLECTION), { icon: ICON_FOLDER }], SEP, select]);
+    return;
+  }
   showFolderCtxMenu(ev, [
     [tr("collections.editContext"), () => editCollectionContext(c), { icon: ICON_FOLDER }],
     [tr("common.rename"), () => renameCollection(c.name), { icon: ICON_RENAME }],
@@ -7658,21 +7662,23 @@ function openCollectionCtxMenu(ev, c) {
   ]);
 }
 
-// editCollectionContext loads a collection's full snapshot (per-session defaults
-// + instructions/memory prose) and opens the context editor. Saving splits the
-// write: scalars (squad/cwd/memory_size/auto_update) via PATCH, prose via PUT …/context.
-async function editCollectionContext(c) {
+// editCollectionContext loads a collection's snapshot (per-session defaults +
+// instructions) and opens the context editor. Saving splits the write: scalars
+// (squad/cwd) via PATCH, instructions via PUT …/context. The memories are saved
+// one by one from the dialog's memory list, not by its Save button.
+// opts.focusMemory scrolls the dialog to its memory section.
+async function editCollectionContext(c, opts = {}) {
   let snap = {};
   try {
     const res = await apiFetch(`/api/collections/${encodeURIComponent(c.name)}/context`);
     if (res.ok) snap = await res.json();
   } catch (e) { console.error(e); }
-  const chosen = await collectionContextDialog(c.name, snap);
+  const chosen = await collectionContextDialog(c.name, snap, opts);
   if (chosen == null) return;
   try {
     const p = await apiFetch(`/api/collections/${encodeURIComponent(c.name)}`, {
       method: "PATCH",
-      body: JSON.stringify({ squad: chosen.squad, cwd: chosen.cwd, memory_size: chosen.memory_size, auto_update: chosen.auto_update }),
+      body: JSON.stringify({ squad: chosen.squad, cwd: chosen.cwd }),
     });
     if (!p.ok) {
       const b = await p.json().catch(() => ({}));
@@ -7681,7 +7687,7 @@ async function editCollectionContext(c) {
     }
     const q = await apiFetch(`/api/collections/${encodeURIComponent(c.name)}/context`, {
       method: "PUT",
-      body: JSON.stringify({ instructions: chosen.instructions, memory: chosen.memory }),
+      body: JSON.stringify({ instructions: chosen.instructions }),
     });
     if (!q.ok) {
       const b = await q.json().catch(() => ({}));
@@ -7693,6 +7699,18 @@ async function editCollectionContext(c) {
   } catch (e) { console.error(e); }
 }
 
+// openCollectionMemory opens a collection's context dialog on its memory
+// section. General has no instructions or profile, so its dialog shows the
+// memory list only. Used by /memory and by General's ⋯ menu.
+function openCollectionMemory(collection) {
+  const key = memoryCollectionKey(collection);
+  if (key === GENERAL_COLLECTION) {
+    collectionContextDialog(GENERAL_COLLECTION, {}, { memoryOnly: true });
+    return;
+  }
+  editCollectionContext({ name: key }, { focusMemory: true });
+}
+
 // ── Collection field help popup ─────────────────────────────────────────────
 // A small "?" button before the Instructions / Memory titles opens a themed
 // popup explaining what the field is for and how it differs from the other.
@@ -7701,7 +7719,7 @@ async function editCollectionContext(c) {
 // self-contained here since that one lives in the Settings IIFE. One popup at a
 // time; dismissed on outside-click, Escape, scroll or resize.
 let _ccHelpPopup = null;
-let _ccModalBusy = false; // true while a child modal (e.g. the auto-update warning) is open
+let _ccModalBusy = false; // true while a child modal (e.g. the memory delete confirmation) is open
 function closeCcHelpPopup() {
   if (!_ccHelpPopup) return;
   const p = _ccHelpPopup;
@@ -7763,25 +7781,36 @@ function ccHelpButton(text) {
 }
 
 // collectionContextDialog is the per-collection context editor: a starting-squad
-// picker + default-folder field (the seeded per-session defaults) and two prose
-// textareas (stable instructions, evolving memory), plus the memory size/
-// auto-update controls. Resolves
-// { squad, cwd, instructions, memory, memory_size, auto_update } or null.
-function collectionContextDialog(name, snap) {
+// picker + default-folder field (the seeded per-session defaults), the
+// instructions textarea, and the collection's memory list (each memory saved or
+// deleted on its own, see buildMemoryList). Resolves { squad, cwd, instructions }
+// or null. opts.memoryOnly (General) shows the memory list alone and resolves
+// null; opts.focusMemory scrolls to the memory list.
+function collectionContextDialog(name, snap, opts = {}) {
   return new Promise((resolve) => {
-    const overlay = uiModalShell(tr("collections.contextTitle", { name }));
+    const memoryOnly = !!opts.memoryOnly;
+    const overlay = uiModalShell(tr(memoryOnly ? "collections.memoryTitle" : "collections.contextTitle", { name }));
     overlay.querySelector(".ui-modal").classList.add("collection-ctx-modal");
+    if (memoryOnly) overlay.querySelector(".ui-modal").classList.add("cc-memory-only");
     const body = overlay.querySelector(".user-cmd-modal-body");
-    const opts = ['<option value="">' + escHtml(tr("collections.squadRouter")) + "</option>"]
+    const squadOpts = ['<option value="">' + escHtml(tr("collections.squadRouter")) + "</option>"]
       .concat((availableSquads || []).map((s) => {
         const sel = (snap.squad || "").toLowerCase() === (s.name || "").toLowerCase() ? " selected" : "";
         return `<option value="${escHtml(s.name)}"${sel}>${escHtml(s.name)}</option>`;
       })).join("");
-    body.innerHTML = `
+    const memSection = `
+      <div class="user-cmd-field cc-grow-mem">
+        <div class="cc-mem-head">
+          <span class="user-cmd-field-label cc-label-row cc-mem-label">${escHtml(tr("collections.memory"))}</span>
+          <button type="button" class="cc-mem-add">${escHtml(tr("memory.add"))}</button>
+        </div>
+        <div class="cc-mem-list"></div>
+      </div>`;
+    body.innerHTML = memoryOnly ? memSection : `
       <div class="cc-defaults-row">
         <label class="user-cmd-field">
           <span class="user-cmd-field-label cc-label-row cc-squad-label">${escHtml(tr("collections.defaultSquad"))}</span>
-          <select class="cc-squad">${opts}</select>
+          <select class="cc-squad">${squadOpts}</select>
         </label>
         <label class="user-cmd-field">
           <span class="user-cmd-field-label">${escHtml(tr("collections.defaultCwd"))}</span>
@@ -7791,151 +7820,56 @@ function collectionContextDialog(name, snap) {
       <label class="user-cmd-field cc-grow-instr">
         <span class="user-cmd-field-label cc-label-row cc-instr-label">${escHtml(tr("collections.instructions"))}</span>
         <textarea class="cc-instr" spellcheck="false" placeholder="${escHtml(tr("collections.instructionsPlaceholder"))}"></textarea>
-      </label>
-      <div class="user-cmd-field cc-grow-mem">
-        <div class="cc-mem-head">
-          <span class="user-cmd-field-label cc-label-row cc-mem-label">${escHtml(tr("collections.memory"))}</span>
-          <button type="button" class="cc-mem-gen">${escHtml(tr("collections.memoryGenerate"))}</button>
-        </div>
-        <div class="cc-mem-editor">
-          <textarea class="cc-mem" spellcheck="false" placeholder="${escHtml(tr("collections.memoryPlaceholder"))}"></textarea>
-          <div class="cc-mem-controls">
-            <div class="cc-size-row" role="radiogroup" aria-label="${escHtml(tr("collections.memorySizeLabel"))}">
-              <span class="cc-size-caption">${escHtml(tr("collections.memorySizeLabel"))}</span>
-              <label class="cc-size-radio" data-tip="${escHtml(tr("collections.memorySizeSmallTip"))}"><input type="radio" name="cc-size" value="small"> ${escHtml(tr("collections.memorySizeSmall"))}</label>
-              <label class="cc-size-radio" data-tip="${escHtml(tr("collections.memorySizeMediumTip"))}"><input type="radio" name="cc-size" value="medium"> ${escHtml(tr("collections.memorySizeMedium"))}</label>
-              <label class="cc-size-radio" data-tip="${escHtml(tr("collections.memorySizeLargeTip"))}"><input type="radio" name="cc-size" value="large"> ${escHtml(tr("collections.memorySizeLarge"))}</label>
-            </div>
-            <label class="cc-autoupdate"><input type="checkbox" class="cc-autoupdate-cb"> <span data-tip="${escHtml(tr("collections.autoUpdateTip"))}">${escHtml(tr("collections.autoUpdate"))}</span></label>
-          </div>
-        </div>
-        <div class="cc-mem-foot">
-          <span class="cc-word-count"></span>
-          <span class="cc-revert-marker" hidden><span class="cc-revert-text"></span> <button type="button" class="cc-revert-btn">${escHtml(tr("collections.memoryRevert"))}</button></span>
-        </div>
-      </div>`;
-    body.querySelector(".cc-cwd").value = snap.cwd || "";
-    body.querySelector(".cc-instr").value = snap.instructions || "";
-    body.querySelector(".cc-mem").value = snap.memory || "";
+      </label>${memSection}`;
     // A "?" help button before each title explains what the field is for, how to
     // fill it, and how it differs from the other — so a user knows when to reach
     // for Instructions (how the agent should behave) vs Memory (durable facts).
-    body.querySelector(".cc-squad-label").prepend(ccHelpButton(tr("collections.defaultSquadHelp")));
-    body.querySelector(".cc-instr-label").prepend(ccHelpButton(tr("collections.instructionsHelp")));
     body.querySelector(".cc-mem-label").prepend(ccHelpButton(tr("collections.memoryHelp")));
-
-    // ── Memory size (soft target) + live word counter ──
-    const CC_SIZE_LIMITS = { small: 200, medium: 350, large: 700 };
-    const memEl = body.querySelector(".cc-mem");
-    const sizeInputs = Array.from(body.querySelectorAll('input[name="cc-size"]'));
-    const initialSize = CC_SIZE_LIMITS[snap.memory_size] ? snap.memory_size : "medium";
-    for (const r of sizeInputs) r.checked = r.value === initialSize;
-    const wordCountEl = body.querySelector(".cc-word-count");
-    const currentSize = () => (sizeInputs.find((r) => r.checked) || {}).value || "medium";
-    const updateWordCount = () => {
-      const n = (memEl.value.trim().match(/\S+/g) || []).length;
-      const limit = CC_SIZE_LIMITS[currentSize()];
-      wordCountEl.textContent = tr("collections.memoryWords", { n, limit });
-      wordCountEl.classList.toggle("over", n > limit);
-    };
-    memEl.addEventListener("input", updateWordCount);
-    for (const r of sizeInputs) r.addEventListener("change", updateWordCount);
-    updateWordCount();
-
-    // ── Auto-update toggle (+ enable warning) ──
-    const autoCb = body.querySelector(".cc-autoupdate-cb");
-    autoCb.checked = !!snap.auto_update;
-    autoCb.addEventListener("change", async () => {
-      if (!autoCb.checked) return; // turning OFF never warns
-      _ccModalBusy = true;
-      const ok = await uiConfirm({
-        title: tr("collections.autoUpdateWarnTitle"),
-        message: tr("collections.autoUpdateWarnMsg"),
-        confirmText: tr("collections.autoUpdateConfirm"),
-        cancelText: tr("common.cancel"),
-      });
-      _ccModalBusy = false;
-      if (!ok) autoCb.checked = false; // declined ⇒ leave it off
-    });
-
-    // ── Revert marker (only when an unreviewed auto-commit snapshot exists) ──
-    const revertMarker = body.querySelector(".cc-revert-marker");
-    const revertText = body.querySelector(".cc-revert-text");
-    const relAgo = (sec) => {
-      const s = Math.max(0, Math.floor(Date.now() / 1000) - (sec || 0));
-      if (s < 60) return `${s}s`;
-      const m = Math.floor(s / 60);
-      if (m < 60) return `${m}m`;
-      const h = Math.floor(m / 60);
-      if (h < 24) return `${h}h`;
-      return `${Math.floor(h / 24)}d`;
-    };
-    if (snap.has_prev_memory) {
-      revertText.textContent = tr("collections.memoryAutoUpdated", { ago: relAgo(snap.last_memory_update) });
-      revertMarker.hidden = false;
+    if (!memoryOnly) {
+      body.querySelector(".cc-cwd").value = snap.cwd || "";
+      body.querySelector(".cc-instr").value = snap.instructions || "";
+      body.querySelector(".cc-squad-label").prepend(ccHelpButton(tr("collections.defaultSquadHelp")));
+      body.querySelector(".cc-instr-label").prepend(ccHelpButton(tr("collections.instructionsHelp")));
     }
-    body.querySelector(".cc-revert-btn").addEventListener("click", async () => {
-      try {
-        const res = await apiFetch(`/api/collections/${encodeURIComponent(name)}/memory/revert`, { method: "POST" });
-        const b = await res.json().catch(() => ({}));
-        if (!res.ok) { showToast(b.error || tr("collections.memoryRevertFailed"), "err"); return; }
-        memEl.value = b.memory || "";
-        updateWordCount();
-        revertMarker.hidden = true;
-        showToast(tr("collections.memoryReverted"), "ok");
-      } catch (e) {
-        console.error(e);
-        showToast(tr("collections.memoryRevertFailed"), "err");
-      }
-    });
-    // "Generate from recent chats": distil the collection's recent sessions into a
-    // proposed memory. Propose-then-commit — the draft only fills the (editable)
-    // field; it is saved to disk with the rest on the dialog's Save.
-    const genBtn = body.querySelector(".cc-mem-gen");
-    genBtn.addEventListener("click", async () => {
-      if (genBtn.disabled) return;
-      genBtn.disabled = true;
-      const orig = genBtn.textContent;
-      genBtn.textContent = tr("collections.memoryGenerating");
-      try {
-        const res = await apiFetch(`/api/collections/${encodeURIComponent(name)}/memory/distill`, { method: "POST" });
-        const b = await res.json().catch(() => ({}));
-        if (!res.ok) { showToast(b.error || tr("collections.memoryGenFailed"), "err"); return; }
-        const mem = body.querySelector(".cc-mem");
-        mem.value = b.proposed || "";
-        mem.dispatchEvent(new Event("input"));
-        mem.focus();
-        showToast(tr("collections.memoryGenDone"), "ok");
-      } catch (e) {
-        console.error(e);
-        showToast(tr("collections.memoryGenFailed"), "err");
-      } finally {
-        genBtn.disabled = false;
-        genBtn.textContent = orig;
-      }
-    });
-    // Embed the drafting assistant (help write instructions / adapt memory).
-    caFreshOpen = true;
-    wireCollectionAssistant(overlay, name);
+
+    const memList = buildMemoryList(body.querySelector(".cc-mem-list"), name);
+    body.querySelector(".cc-mem-add").addEventListener("click", () => memList.add());
+
+    // Embed the drafting assistant (help write the instructions).
+    if (!memoryOnly) {
+      caFreshOpen = true;
+      wireCollectionAssistant(overlay, name);
+    }
     const ok = overlay.querySelector(".ui-modal-ok");
-    ok.textContent = tr("common.save");
+    const cancel = overlay.querySelector(".ui-modal-cancel");
+    if (memoryOnly) {
+      ok.hidden = true;
+      cancel.textContent = tr("common.close");
+    } else {
+      ok.textContent = tr("common.save");
+    }
     let done = false;
-    const close = (val) => { if (done) return; done = true; closeCcHelpPopup(); overlay.remove(); document.removeEventListener("keydown", onKey, true); resolve(val); };
+    const close = (val) => {
+      if (done) return;
+      done = true;
+      closeCcHelpPopup();
+      memList.destroy();
+      overlay.remove();
+      document.removeEventListener("keydown", onKey, true);
+      resolve(val);
+    };
     const submit = () => close({
       squad: body.querySelector(".cc-squad").value,
       cwd: body.querySelector(".cc-cwd").value.trim(),
       instructions: body.querySelector(".cc-instr").value,
-      memory: body.querySelector(".cc-mem").value,
-      memory_size: currentSize(),
-      auto_update: autoCb.checked,
     });
-    ok.addEventListener("click", submit);
-    overlay.querySelector(".ui-modal-cancel").addEventListener("click", () => close(null));
+    if (!memoryOnly) ok.addEventListener("click", submit);
+    cancel.addEventListener("click", () => close(null));
     overlay.querySelector(".ui-modal-close").addEventListener("click", () => close(null));
     overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(null); });
     const onKey = (e) => {
       // Enter inside a textarea inserts a newline; only Escape closes. Yield to a
-      // child modal (auto-update warning) and to an open help popup first.
+      // child modal (the memory delete confirmation) and to an open help popup first.
       if (e.key === "Escape") {
         if (_ccModalBusy) return; // the child uiConfirm handles this Escape
         e.preventDefault();
@@ -7944,18 +7878,225 @@ function collectionContextDialog(name, snap) {
       }
     };
     document.addEventListener("keydown", onKey, true);
-    setTimeout(() => body.querySelector(".cc-instr").focus(), 0);
+    if (memoryOnly || opts.focusMemory) {
+      setTimeout(() => body.querySelector(".cc-grow-mem").scrollIntoView({ block: "start" }), 0);
+    } else {
+      setTimeout(() => body.querySelector(".cc-instr").focus(), 0);
+    }
   });
+}
+
+// ── Collection memory list (context dialog) ─────────────────────────────────
+// The collection's memories, grouped by type in the store's order (feedback,
+// user, project, reference). A row shows name + description and expands to an
+// editor (description, type, content with a character counter) with Save and
+// Delete; "Add memory" opens an empty editor with a name field. Each save or
+// delete goes straight to the memory routes. The list follows memory_changed
+// (onMemoryChanged → memoryListViews); an open editor with unsaved text defers
+// the refresh until it is saved or closed.
+const MEMORY_TYPES = ["feedback", "user", "project", "reference"];
+const MEMORY_BODY_MAX = 4000;
+const MEMORY_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const memoryListViews = new Set(); // {collection, refresh}
+
+function buildMemoryList(container, collection) {
+  const base = `/api/collections/${encodeURIComponent(memoryCollectionKey(collection))}/memories`;
+  let list = [];
+  let openName = null;   // expanded row (a memory name), or "" for the Add editor
+  let dirty = false;     // the open editor holds unsaved changes
+  let pending = false;   // a refresh arrived while the editor was dirty
+  let destroyed = false;
+
+  const charCount = (s) => [...(s || "")].length;
+
+  const editorHTML = (isNew) =>
+    `<div class="cc-mem-editor">` +
+      (isNew ? `<label class="user-cmd-field"><span class="user-cmd-field-label">${escHtml(tr("memory.nameLabel"))}</span>` +
+        `<input type="text" class="cc-mem-name" autocomplete="off" spellcheck="false" placeholder="${escHtml(tr("memory.namePlaceholder"))}" /></label>` : "") +
+      `<div class="cc-mem-editor-row">` +
+        `<label class="user-cmd-field cc-mem-desc-field"><span class="user-cmd-field-label">${escHtml(tr("common.description"))}</span>` +
+          `<input type="text" class="cc-mem-desc" autocomplete="off" /></label>` +
+        `<label class="user-cmd-field"><span class="user-cmd-field-label">${escHtml(tr("memory.typeLabel"))}</span>` +
+          `<select class="cc-mem-type">${MEMORY_TYPES.map(t => `<option value="${t}">${escHtml(memoryTypeLabel(t))}</option>`).join("")}</select></label>` +
+      `</div>` +
+      `<label class="user-cmd-field"><span class="user-cmd-field-label">${escHtml(tr("memory.bodyLabel"))}</span>` +
+        `<textarea class="cc-mem-body" rows="6" spellcheck="false"></textarea></label>` +
+      `<div class="cc-mem-editor-foot">` +
+        `<span class="cc-mem-count"></span>` +
+        `<span class="cc-mem-error" role="alert"></span>` +
+        (isNew ? "" : `<button type="button" class="danger cc-mem-delete">${escHtml(tr("memory.delete"))}</button>`) +
+        `<button type="button" class="cc-mem-cancel">${escHtml(tr("common.cancel"))}</button>` +
+        `<button type="button" class="primary cc-mem-save">${escHtml(tr("common.save"))}</button>` +
+      `</div>` +
+    `</div>`;
+
+  const closeEditor = () => {
+    openName = null;
+    dirty = false;
+    if (pending) { pending = false; refresh(); } else render();
+  };
+
+  const wireEditor = (ed, mem) => {
+    const isNew = !mem;
+    const nameEl = ed.querySelector(".cc-mem-name");
+    const descEl = ed.querySelector(".cc-mem-desc");
+    const typeEl = ed.querySelector(".cc-mem-type");
+    const bodyEl = ed.querySelector(".cc-mem-body");
+    const countEl = ed.querySelector(".cc-mem-count");
+    const errEl = ed.querySelector(".cc-mem-error");
+    const saveBtn = ed.querySelector(".cc-mem-save");
+    descEl.value = mem ? (mem.description || "") : "";
+    typeEl.value = mem && MEMORY_TYPES.includes(mem.type) ? mem.type : "project";
+    bodyEl.value = mem ? (mem.body || "") : "";
+    const updateCount = () => {
+      const n = charCount(bodyEl.value);
+      countEl.textContent = tr("memory.charCount", { n, max: MEMORY_BODY_MAX });
+      countEl.classList.toggle("over", n > MEMORY_BODY_MAX);
+    };
+    updateCount();
+    const markDirty = () => { dirty = true; errEl.textContent = ""; };
+    for (const el of [nameEl, descEl, typeEl, bodyEl]) if (el) el.addEventListener("input", markDirty);
+    typeEl.addEventListener("change", markDirty);
+    bodyEl.addEventListener("input", updateCount);
+    ed.querySelector(".cc-mem-cancel").addEventListener("click", closeEditor);
+    saveBtn.addEventListener("click", async () => {
+      const memName = isNew ? nameEl.value.trim() : mem.name;
+      if (isNew) {
+        if (!MEMORY_NAME_RE.test(memName)) { errEl.textContent = tr("memory.nameInvalid"); nameEl.focus(); return; }
+        if (list.some(m => m.name === memName)) { errEl.textContent = tr("memory.nameTaken", { name: memName }); nameEl.focus(); return; }
+      }
+      saveBtn.disabled = true;
+      try {
+        const res = await apiFetch(`${base}/${encodeURIComponent(memName)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ description: descEl.value.trim(), type: typeEl.value, body: bodyEl.value }),
+        });
+        const b = await res.json().catch(() => ({}));
+        if (!res.ok) { errEl.textContent = b.error || tr("common.error"); return; }
+        openName = null;
+        dirty = false;
+        pending = false;
+        onMemoryChanged({ collection });
+      } catch (e) {
+        errEl.textContent = String(e.message || e);
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+    const delBtn = ed.querySelector(".cc-mem-delete");
+    if (delBtn) delBtn.addEventListener("click", async () => {
+      _ccModalBusy = true;
+      const yes = await uiConfirm({ title: tr("memory.delete"), message: tr("memory.deleteConfirm", { name: mem.name }), confirmText: tr("memory.delete"), danger: true });
+      _ccModalBusy = false;
+      if (!yes) return;
+      try {
+        const res = await apiFetch(`${base}/${encodeURIComponent(mem.name)}`, { method: "DELETE" });
+        const b = await res.json().catch(() => ({}));
+        if (!res.ok) { errEl.textContent = b.error || tr("common.error"); return; }
+        openName = null;
+        dirty = false;
+        pending = false;
+        onMemoryChanged({ collection });
+      } catch (e) {
+        errEl.textContent = String(e.message || e);
+      }
+    });
+    setTimeout(() => (nameEl || descEl).focus(), 0);
+  };
+
+  const render = () => {
+    if (destroyed) return;
+    container.innerHTML = "";
+    if (openName === "") {
+      const wrap = document.createElement("div");
+      wrap.className = "cc-mem-new";
+      wrap.innerHTML = editorHTML(true);
+      container.appendChild(wrap);
+      wireEditor(wrap, null);
+    }
+    if (!list.length && openName !== "") {
+      const empty = document.createElement("div");
+      empty.className = "cc-mem-empty";
+      empty.textContent = tr("memory.empty");
+      container.appendChild(empty);
+      return;
+    }
+    for (const type of MEMORY_TYPES) {
+      const group = list.filter(m => m.type === type);
+      if (!group.length) continue;
+      const head = document.createElement("div");
+      head.className = "cc-mem-group";
+      head.textContent = memoryTypeLabel(type);
+      container.appendChild(head);
+      for (const m of group) {
+        const row = document.createElement("div");
+        row.className = "cc-mem-row";
+        const open = openName === m.name;
+        row.classList.toggle("is-open", open);
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "cc-mem-row-head";
+        btn.setAttribute("aria-expanded", open ? "true" : "false");
+        btn.innerHTML = `<span class="cc-mem-row-name"></span><span class="cc-mem-row-desc"></span>`;
+        btn.querySelector(".cc-mem-row-name").textContent = m.name;
+        btn.querySelector(".cc-mem-row-desc").textContent = m.description || "";
+        btn.addEventListener("click", () => {
+          if (open) { closeEditor(); return; }
+          openName = m.name;
+          dirty = false;
+          render();
+        });
+        row.appendChild(btn);
+        if (open) {
+          const ed = document.createElement("div");
+          ed.innerHTML = editorHTML(false);
+          row.appendChild(ed);
+          wireEditor(ed, m);
+        }
+        container.appendChild(row);
+      }
+    }
+  };
+
+  const refresh = async () => {
+    if (destroyed) return;
+    if (dirty) { pending = true; return; }
+    try {
+      list = await loadMemories(collection);
+    } catch (e) {
+      console.error("load memories failed:", e);
+      list = [];
+    }
+    if (dirty) { pending = true; return; }
+    // The open memory was deleted elsewhere: close its editor.
+    if (openName && !list.some(m => m.name === openName)) openName = null;
+    render();
+  };
+
+  const view = { collection, refresh };
+  memoryListViews.add(view);
+  container.innerHTML = `<div class="cc-mem-empty">${escHtml(tr("set.loading"))}</div>`;
+  refresh();
+  return {
+    add() {
+      if (openName === "") return;
+      openName = "";
+      dirty = false;
+      render();
+    },
+    destroy() { destroyed = true; memoryListViews.delete(view); },
+  };
 }
 
 // ── Collection context assistant ────────────────────────────────────────────
 // A small Helper-backed chat embedded in the collection context editor that
-// helps the user WRITE the instructions and ADAPT the memory. Mirrors the
-// in-Settings assistant (a hidden, reusable Helper session; SSE via parseSSE),
-// but its output lands as a DRAFT in the editable fields (propose-then-commit):
-// the assistant proposes text inside fenced ```instructions / ```memory blocks,
-// which the client turns into "Apply" buttons that fill the textareas. Nothing
-// is written to disk until the user reviews it and clicks the dialog's Save.
+// helps the user WRITE the instructions. Mirrors the in-Settings assistant (a
+// hidden, reusable Helper session; SSE via parseSSE), but its output lands as a
+// DRAFT in the editable field (propose-then-commit): the assistant proposes text
+// inside a fenced ```instructions block, which the client turns into an "Apply"
+// button that fills the textarea. Nothing is written to disk until the user
+// reviews it and clicks the dialog's Save.
 const CA_SESSION_KEY = "agent_toolkit_collection_assistant";
 let caSession = null;   // cached hidden Helper session id
 let caFreshOpen = true; // reset the assistant context on the first send per editor open
@@ -7979,27 +8120,24 @@ async function createCollectionAsstSession() {
   return caSession;
 }
 
-// extractCollectionDrafts pulls ```instructions / ```memory fenced blocks out of
-// the assistant's markdown so the client can offer to apply them to the fields.
+// extractCollectionDrafts pulls ```instructions fenced blocks out of the
+// assistant's markdown so the client can offer to apply them to the field.
 function extractCollectionDrafts(md) {
   const out = {};
-  const re = /```(instructions|memory)[ \t]*\r?\n([\s\S]*?)```/g;
+  const re = /```(instructions)[ \t]*\r?\n([\s\S]*?)```/g;
   let m;
   while ((m = re.exec(md || "")) !== null) out[m[1]] = m[2].replace(/\s+$/, "");
   return out;
 }
 
 // wireCollectionAssistant restructures the context modal into [fields | chat]
-// and wires the drafting chat. Its entry points are a floating "Assistant"
-// button anchored inside EACH field textarea (so the assistant's purpose reads
-// off the field it sits on), not one generic header toggle; it captures the two
-// field textareas so a per-field button can seed a tuned starter and "Apply"
-// can fill them directly.
+// and wires the drafting chat. Its entry point is a floating "Assistant" button
+// anchored inside the instructions textarea (so the assistant's purpose reads
+// off the field it sits on); "Apply" fills that textarea directly.
 function wireCollectionAssistant(overlay, name) {
   const modalEl = overlay.querySelector(".ui-modal");
   const bodyEl = overlay.querySelector(".user-cmd-modal-body");
   const instr = bodyEl.querySelector(".cc-instr");
-  const mem = bodyEl.querySelector(".cc-mem");
 
   // Lay the fields and the chat side by side: [header, split[body, aside], footer].
   const split = document.createElement("div");
@@ -8054,7 +8192,6 @@ function wireCollectionAssistant(overlay, name) {
     const bar = document.createElement("div");
     bar.className = "cc-asst-apply";
     if (drafts.instructions != null) bar.appendChild(mkBtn("collections.applyInstructions", instr, drafts.instructions));
-    if (drafts.memory != null) bar.appendChild(mkBtn("collections.applyMemory", mem, drafts.memory));
     if (bar.children.length) { bubble.appendChild(bar); scrollBottom(); }
   };
 
@@ -8071,12 +8208,12 @@ function wireCollectionAssistant(overlay, name) {
   };
   closeBtn.addEventListener("click", () => setOpen(false));
 
-  // A floating "Assistant" button lives inside each field's textarea. Clicking it
+  // A floating "Assistant" button lives inside the field's textarea. Clicking it
   // opens the chat and points its composer PLACEHOLDER at that field — a hint, not
   // pre-filled text (which the user would have to delete before typing) — so the
   // button's purpose is unambiguous from where it sits. The textarea is wrapped so
-  // the button anchors to its bottom-right (clear of the label / "Generate" head /
-  // hint) and scrolls with neither.
+  // the button anchors to its bottom-right (clear of the label) and scrolls with
+  // neither.
   const attachFieldBtn = (ta, starterKey) => {
     if (!ta) return;
     const wrap = document.createElement("div");
@@ -8099,7 +8236,6 @@ function wireCollectionAssistant(overlay, name) {
     fieldBtns.push(b);
   };
   attachFieldBtn(instr, "collections.asstStarterInstr");
-  attachFieldBtn(mem, "collections.asstStarterMem");
 
   async function send() {
     if (sending) return;
@@ -8112,7 +8248,6 @@ function wireCollectionAssistant(overlay, name) {
     const prompt =
       tr("collections.asstPreamble", { name }) + "\n\n" +
       "CURRENT INSTRUCTIONS:\n" + (instr.value.trim() || "(empty)") + "\n\n" +
-      "CURRENT MEMORY:\n" + (mem.value.trim() || "(empty)") + "\n\n" +
       "USER REQUEST:\n" + text;
     try {
       let sid = await ensureCollectionAsstSession();
@@ -10813,6 +10948,7 @@ const BUILTIN_SLASH_COMMANDS = [
   { cmd: "/compress",      args: "",           desc: "Trigger context compression before the next model call", kind: "common", builtin: true },
   { cmd: "/init",          args: "",           desc: "Analyze the repo and write a starter AGENT.md", kind: "common", builtin: true },
   { cmd: "/cost",          args: "",           desc: "Alias for /usage", kind: "common", builtin: true },
+  { cmd: "/memory",        args: "",           desc: tr("slash.memory"), kind: "common", builtin: true },
   { cmd: "/learn-now",     args: "[reason]",   desc: "Immediately run soft-skill curation and show result", kind: "common", builtin: true },
   { cmd: "/rollback",      args: "[N|all]",    desc: "Undo recent settings changes (revert the last one, N of them, or all)", kind: "common", builtin: true },
   // Session — actions/info about the current conversation.
@@ -10851,7 +10987,7 @@ const SLASH_SECTIONS = [
 ];
 // Fixed (non-alphabetical) order for the "common" section — most-used commands
 // first. A "common" command not listed here sorts after these, alphabetically.
-const COMMON_ORDER = ["/help", "/compress", "/init", "/cost", "/learn-now", "/rollback"];
+const COMMON_ORDER = ["/help", "/compress", "/init", "/cost", "/memory", "/learn-now", "/rollback"];
 
 // sortSlashSection orders one section's rows: the "common" section follows the
 // curated COMMON_ORDER (importance, not A→Z); every other section is A→Z by cmd.
@@ -11930,6 +12066,12 @@ async function handleSlashCommand(raw, panel) {
       } catch (err) {
         appendCommandBubble(String(err), true, panel);
       }
+      break;
+    }
+
+    case "memory": {
+      // The focused session's collection; a draft or editor tab ⇒ General.
+      openCollectionMemory(await memoryCollectionOf(panel.sessionId));
       break;
     }
 
