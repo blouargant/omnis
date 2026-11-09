@@ -241,7 +241,8 @@ on the squad you pick (or `default`). To define new squads, see the
 
 An agent can ask a question you are free to ignore. The web UI shows it
 discreetly, as a small pulsing "?" in the composer toolbar instead of a question
-card: click it to answer, or ignore it and it goes away.
+card: click it to answer or skip it. If you ignore it, it goes away when its
+time limit runs out (when the agent set one) or when the turn is stopped.
 
 ## Hot reload
 

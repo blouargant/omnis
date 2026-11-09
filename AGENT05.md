@@ -98,8 +98,7 @@ Provider, model, and API key are set via environment variables (see the env vars
 
 ```
 omnis/
-├── main.go                   # Root binary entry: CLI / TUI / curate dispatch. The only wiring file.
-├── curate.go                 # `omnis curate` one-shot subcommand
+├── main.go                   # Root binary entry: CLI / TUI dispatch. The only wiring file.
 ├── server/                   # Separate binary: HTTP + SSE API + web UI server
 ├── web/                      # Vanilla-JS chat UI assets served by server/
 │   └── docs/                 # In-app documentation (Markdown, served to the web UI)

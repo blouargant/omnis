@@ -48,7 +48,7 @@ func NewAskUserTool(reg *askuser.Registry) tool.Tool {
 		"Ask the user a question and wait for the answer. `kind`: \"single\" (pick one of 2-4 `choices`), "+
 			"\"multi\" (pick several), \"text\" (free text) or \"confirm\" (yes/no, safest choice first). "+
 			"`prompt` is markdown. `allow_text` also accepts free text with choices; `default` pre-selects a value; "+
-			"`subtle` shows an optional question (e.g. a wrap-up check) discreetly — pair it with `timeout_seconds`.",
+			"`subtle` shows an optional question (e.g. a feedback check) discreetly — pair it with `timeout_seconds`.",
 		askUserHandler(reg),
 	)
 }

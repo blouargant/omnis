@@ -69,7 +69,7 @@ func TestAskUserQuestionReleasedByRunContextCancel(t *testing.T) {
 	}
 }
 
-// A subtle question (the wrap-up check) is optional: it is not durable — there
+// A subtle question (e.g. a feedback check) is optional: it is not durable — there
 // is nothing to resume after a restart — and it reaches the browser flagged so
 // the web UI renders it as a discreet composer indicator instead of the card.
 func TestAskUserQuestionSubtleIsNotDurableAndFlagged(t *testing.T) {

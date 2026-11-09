@@ -8,8 +8,8 @@ agent saves a small memory **in that same turn**, and every later chat of the
 same collection starts with it — you don't have to say it again, and the agent
 doesn't have to go looking for it.
 
-- **Scope** — one memory per collection; chats outside any collection share
-  **General**'s memory.
+- **Scope** — each collection has its own memories; chats outside any
+  collection share **General**'s.
 - **What is kept** — four types: **Feedback** (corrections and confirmed ways of
   working) and **User** (who you are, your preferences) are given to the agent in
   full on every turn; **Project** (decisions, constraints, dates) and
@@ -46,8 +46,8 @@ digest:
 Key properties:
 
 - **Cadence** — extraction runs every 5 model responses by default. This is a
-  build-time setting, not an environment variable. The `compact_now` tool (and
-  the manual compaction path) force an extraction on the next turn.
+  build-time setting, not an environment variable. A manual compaction (`/compress`)
+  forces an extraction on the next turn.
 - **LLM-extracted** — `goal`, `decisions`, `open_issues`, `files`, and `tools`
   are all produced by the model. Only the turn count is set mechanically.
 - **Merged, not replaced** — each extraction merges into the running log: the

@@ -296,9 +296,8 @@ func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hoo
 
 // FireHook runs the hook commands configured for (event, subject) directly,
 // bypassing the event bus. The server uses it for lifecycle moments that must
-// not flow through the bus — notably SessionStart / SessionEnd, since the bus
-// EventSessionEnd also drives the reflection/curation pipeline that web-UI
-// sessions deliberately skip. It is a no-op when the hooks engine has not been
+// not flow through the bus — notably SessionStart / SessionEnd, since web-UI
+// sessions never emit the bus EventSessionStart / EventSessionEnd. It is a no-op when the hooks engine has not been
 // built yet (no instance constructed) or when no hook matches. The hook input's
 // cwd defaults to the session's working directory when unset.
 func (i *Infrastructure) FireHook(ctx context.Context, event, subject string, in hooks.Input) {

@@ -400,8 +400,7 @@ learning path (setup in [docs/notebooks.md](docs/notebooks.md)).
 
 ```
 omnis/
-├── main.go                      # root binary entry point: CLI / TUI / curate dispatch
-├── curate.go                    # `omnis curate` one-shot subcommand
+├── main.go                      # root binary entry point: CLI / TUI dispatch
 ├── server/                      # separate binary: HTTP + SSE API + web UI
 ├── web/                         # vanilla-JS chat UI assets served by server/
 ├── agent/                       # NewAgent() — single wiring entry point
