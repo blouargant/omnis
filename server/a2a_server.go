@@ -570,6 +570,11 @@ func (s *a2aServer) runRouted(ctx context.Context, routing *sessionRouting, prom
 	// interactive turn on another session filters them out of its stream (the
 	// event bus is process-wide).
 	ctx = events.WithRootSession(ctx, routing.SessionID)
+	// An inbound A2A call is not the user: the turn may read the collection
+	// memory but not write it.
+	if memoryReadOnlyFor("a2a") {
+		ctx = toolkitagent.WithMemoryReadOnly(ctx)
+	}
 	parts := []*genai.Part{{Text: prompt}}
 
 	run := func(rctx context.Context, sq *toolkitagent.SquadInstance, squadName string, hopParts []*genai.Part) (string, error) {

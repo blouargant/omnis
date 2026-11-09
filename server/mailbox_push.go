@@ -261,6 +261,20 @@ func (b *sessionPushBroadcaster) broadcastOwned(event, sid, owner string) {
 	b.mu.RUnlock()
 }
 
+// broadcastOwnedData is broadcastOwned plus a structured payload (pushMsg.Data,
+// merged into the SSE data object). Used by the collection memory routes'
+// memory_changed event, which concerns the caller and no session.
+func (b *sessionPushBroadcaster) broadcastOwnedData(event, sid, owner string, data map[string]any) {
+	b.mu.RLock()
+	for ch := range b.all {
+		select {
+		case ch <- pushMsg{Event: event, SID: sid, Owner: owner, Data: data}:
+		default:
+		}
+	}
+	b.mu.RUnlock()
+}
+
 // pushVisible decides whether a push event reaches a subscriber. login ""
 // (not cookie mode) receives everything. In cookie mode an event naming an
 // owner goes only to that owner; a session-less, owner-less event goes to
@@ -381,7 +395,12 @@ func (pm *pushManager) inject(ctx context.Context, d serverDeps, sessionID, user
 	// replyTo=from arms the host-side reply backstop: if the answering squad does
 	// not itself send a mailbox reply during the turn, the host forwards the reply
 	// to `from` once, so the sender's workflow is never stranded on a missed reply.
-	pm.injectTurnRouted(ctx, d, sessionID, userID, answer, message, "mailbox_push", from)
+	// The message did not come from the user: its turn may read the
+	// collection's memory but not write it.
+	pm.injectTurnOpts(ctx, d, sessionID, userID, injectOpts{
+		AnswerPrompt: answer, RouterPrompt: message, SSEEvent: "mailbox_push", ReplyTo: from,
+		MemoryReadOnly: memoryReadOnlyFor("mailbox"),
+	})
 }
 
 // injectNotification delivers a batch of completed/streamed background-task
@@ -496,6 +515,10 @@ type injectOpts struct {
 	// durable-question resume sets it: a session archived between the last
 	// answer and the resume must never run an agent turn.
 	SkipIfArchived bool
+	// MemoryReadOnly runs the turn with a read-only collection memory
+	// (agent.WithMemoryReadOnly): set for turns the user did not start (see
+	// memoryReadOnlyFor).
+	MemoryReadOnly bool
 }
 
 // skipInjected reports whether an injected turn must not run: the session is
@@ -608,6 +631,9 @@ func (pm *pushManager) injectTurnOpts(ctx context.Context, d serverDeps, session
 	}
 
 	ctx = turnContext(ctx, d, sessionID, userID)
+	if o.MemoryReadOnly {
+		ctx = toolkitagent.WithMemoryReadOnly(ctx)
+	}
 
 	// Arm the per-turn spend ceiling for this injected turn too. A spawned task or
 	// a scheduled routine runs unattended, so an unbounded one is worse here than

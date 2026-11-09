@@ -145,7 +145,12 @@ func runSpawnedTask(d serverDeps, childID, childLabel, parentID, userID, task st
 		notice := formatSpawnResultNotice(childLabel, task, reply)
 		// "mailbox_push" makes an open parent tab append the delivered turn (the
 		// notice + the leader's reaction) via appendNewPushTurns.
-		d.PushMgr.injectTurn(d.rootCtx, d, parentID, userOrDefault(userID), notice, "mailbox_push")
+		// The notice carries the child's output, not the user's words: the
+		// parent's reaction turn may read the collection memory but not write it.
+		d.PushMgr.injectTurnOpts(d.rootCtx, d, parentID, userOrDefault(userID), injectOpts{
+			AnswerPrompt: notice, RouterPrompt: notice, SSEEvent: "mailbox_push",
+			MemoryReadOnly: memoryReadOnlyFor("spawn_result"),
+		})
 	}()
 }
 

@@ -493,6 +493,9 @@ func run() error {
 		SessionIndex:        sessionIndex,
 		Suggest:             newSuggestStore(),
 	}
+	// Tell the web UI when an agent tool writes a collection memory.
+	defer installMemoryChangeHook(deps)()
+
 	// Mailbox + background-task watchers for the persisted sessions. They get
 	// the FULL deps (Cookie included) so an injected turn after a restart hands
 	// the owner's token to shell tools once the owner has logged back in.
