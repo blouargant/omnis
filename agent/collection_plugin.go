@@ -200,6 +200,11 @@ func injectCollectionCtx(ctx adk.CallbackContext, req *model.LLMRequest, forRout
 	if req == nil {
 		return nil, nil
 	}
+	if !forRouter {
+		// What the user said, for memory_save's provenance check (a tool has
+		// no access to the session in ADK v2).
+		sessionUserWordsStore.record(ctx.SessionID(), req.Contents)
+	}
 	// Reuse the AGENT.md prepend helper (same package) — identical shape.
 	prependAgentMD(req, collectionCtxBlock(ctx.SessionID(), forRouter))
 	return nil, nil

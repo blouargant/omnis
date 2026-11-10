@@ -20,6 +20,7 @@
 ## 2.2 (in development) — Collection memory
 
 - **Collection memory** — Omnis remembers your corrections and preferences per collection and applies them in every later chat there.
+- **Memory ignores instructions hidden in files** — Omnis only remembers what you said or approved: a note planted in a file or a web page the agent reads is no longer saved as your preference.
 - **Soft-skills retired** — soft-skills, the post-session curator and the `/learn` / `/learn-now` commands are removed; collection memory replaces them, and old configurations and conversations keep loading.
 
 ## 2.1 (in development) — Collection tree and settings dialog

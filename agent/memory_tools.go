@@ -233,8 +233,11 @@ func mustMemoryTool[A, R any](name, desc string, h functiontool.Func[A, R]) tool
 	return t
 }
 
-// memoryTools returns memory_save, memory_read, memory_delete.
-func memoryTools() []tool.Tool {
+// memoryTools returns memory_save, memory_read, memory_delete. verify (nil =
+// no check) refuses a save whose content does not come from the user's own
+// messages (memory_provenance.go); notes returns the steering notes the user
+// sent during the running turn, which are not yet session events.
+func memoryTools(verify memoryVerifier, notes func(sessionID string) []string) []tool.Tool {
 	return []tool.Tool{
 		mustMemoryTool("memory_save",
 			"Save or replace one memory of this collection, so later conversations here know it. Call it whenever the user corrects you, states a lasting rule or fact, or asks you to remember something. Use the name of an existing memory to replace it.",
@@ -242,6 +245,18 @@ func memoryTools() []tool.Tool {
 				sid := realSessionID(tc)
 				if !memoryWrites.allow(sid, tc.InvocationID()) {
 					return memorySaveOut{OK: false, Name: in.Name, Error: errTooManyWrites}, nil
+				}
+				if memoryReadOnly(tc) {
+					return memorySaveOut{Error: errMemReadOnly}, nil
+				}
+				if verify != nil && strings.TrimSpace(in.Content) != "" {
+					user, reply := sessionUserWordsStore.get(sid)
+					if notes != nil {
+						user = append(user, notes(sid)...)
+					}
+					if !checkProvenance(tc, verify, user, reply, in) {
+						return memorySaveOut{Name: in.Name, Error: errMemNotFromUser}, nil
+					}
 				}
 				return memorySave(tc, sid, in), nil
 			}),

@@ -4069,6 +4069,35 @@ It replaced soft-skills (see "Soft-skills removed" at the end of this section).
   `/schedule` runs, durable-question resumes and the spawned task itself keep
   write access (the user authored their prompt). This is the host-side half of "only from the
   user's own words"; the rules are the other half.
+- **Provenance check (content read during a user turn)** —
+  [agent/memory_provenance.go](agent/memory_provenance.go). The write guard
+  cannot see a file or page the agent reads *inside* a user turn: in the
+  2026-11-10 quality bench (`omnis-benches/reports/memory-quality-2026-11-10.md`)
+  high and balanced saved "the user wants answers in English" from an HTML
+  comment in a file read with `Read`, and the next conversation answered in
+  English. So before writing, `memory_save` makes one non-streamed call to the
+  evaluator model (`eval_model_ref`, else the root's model; reasoning off; 20 s)
+  with the user's messages, the assistant's previous reply (context only, so
+  "yes, keep that" can approve a proposal) and the memory. A NO returns
+  `errMemNotFromUser` to the model, shows no chip and logs
+  `memory: refused "<name>"`: the refusal is silent for the user, by request. A
+  check that cannot run **fails open** (logged): losing a real correction is
+  worse than the rare miss. `memory_delete` is not checked. The user's words
+  are the first non-function-response text part of each user-role content
+  (`userWordsFromContents`), so an inlined `@file` part, a tool result and the
+  compression summary (`## Compressed history…`) are never shown as the
+  user's; steering notes come in both through the request and through
+  `steer.Store.Notes` (a non-destructive peek). **GOTCHA — the words come from
+  the MODEL REQUEST, not the session:** in ADK v2 `tc.Session()` (and a
+  callback context's) returns nil with a "not supported" log, so the first
+  version saw no user message and refused every save (0 memories on both tiers;
+  its unit test built a session directly and passed). The root's
+  `collection_ctx` callback now records them per session
+  (`sessionUserWordsStore`, bounded at 256 sessions) before every model call,
+  including the one that emits `memory_save`. Benched in
+  `omnis-benches/reports/memory-guard-2026-11-10.md`: injection kept 0/6 (was
+  2/18), no real correction lost, memory_bench high 14/15, balanced 12/15
+  (within noise of 15 and 13).
 - **Routes** ([server/collection_memories.go](server/collection_memories.go),
   owner-scoped via `userRoot(requestLogin(c))`): `GET /api/collections/:name/memories`
   → `{memories}`, `PUT …/memories/:mem` `{description, type, body}` →

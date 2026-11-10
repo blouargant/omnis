@@ -333,7 +333,11 @@ func buildSquadInstance(
 	// memory_save / memory_read / memory_delete keep the collection's memory.
 	// Answering roots only: the router never acts, and sub-agents never get them.
 	if !isRouter {
-		leadTools = append(leadTools, memoryTools()...)
+		var notes func(string) []string
+		if infra.SteerStore != nil {
+			notes = infra.SteerStore.Notes
+		}
+		leadTools = append(leadTools, memoryTools(newMemoryVerifier(runtime, rootCfg), notes)...)
 	}
 
 	rootDescription := rootCfg.Description

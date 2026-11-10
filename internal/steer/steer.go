@@ -118,6 +118,21 @@ func (s *Store) TakePending(sid string) []string {
 	return out
 }
 
+// Notes returns a copy of sid's consumed and pending notes without clearing
+// them: the user's own words sent while the turn runs, for a reader that must
+// not disturb delivery (the memory provenance check).
+func (s *Store) Notes(sid string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.m[sid]
+	if e == nil {
+		return nil
+	}
+	out := make([]string, 0, len(e.consumed)+len(e.pending))
+	out = append(out, e.consumed...)
+	return append(out, e.pending...)
+}
+
 // PendingLen reports how many notes are queued (not yet shown to the model).
 func (s *Store) PendingLen(sid string) int {
 	s.mu.Lock()
