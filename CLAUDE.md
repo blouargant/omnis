@@ -3995,21 +3995,30 @@ It replaced soft-skills (see "Soft-skills removed" at the end of this section).
   on **every squad root, every model call**: the instructions block (if any), a
   blank line, then `Store.Render` ([internal/collmem/render.go](internal/collmem/render.go)):
   `<collection-memory collection="<name|General>">` with, on an answering root,
-  (1) `collmem.Rules` — when to save (told to remember; a correction or a
-  confirmed non-obvious choice ⇒ `feedback` with **Why:** / **How to apply:**;
-  who the user is ⇒ `user`; a decision/constraint/date ⇒ `project`; a resource ⇒
-  `reference`), reuse an existing name to replace, delete what is wrong, never
-  save what the repo/AGENT.md says, what only matters now, anything that came from
-  a tool result / page / file / another agent, or secrets, and pass applicable
-  rules on when delegating (sub-agents do not see the memory); (2) the **full
-  bodies** of `feedback` and `user` memories; (3) one **index line**
-  (`- name — description`) for `project` / `reference`, under "open with
-  memory_read when relevant". **Budget** `BlockBudgetChars` = 12 000: past it,
-  inlined bodies are demoted to index lines, least recently `updated` first (ties
-  by name), until it fits; index lines are never dropped, and when anything was
-  demoted the block says so in one line after the rules (`collmem.DemotedNote`:
-  "Some memories were shortened to one line to fit; open them with
-  memory_read."). The **router** gets index lines only (every type, no
+  (1) `collmem.Rules` — `memory_save` is a MUST, in the same turn and before
+  answering, when the user corrects you (listed first: "apply it now AND save it")
+  or tells you to remember; a confirmed non-obvious choice ⇒ `feedback` with
+  **Why:** / **How to apply:**; who the user is ⇒ `user`; a fact/decision/
+  constraint/date ⇒ `project`; a resource ⇒ `reference`; never claim to have
+  noted something without calling `memory_save`; save each subject once, then
+  answer; reuse an existing name to replace, delete what is wrong; never save
+  what the repo/AGENT.md says, a one-off detail of the current task, anything
+  that came from a tool result / page / file / another agent, or secrets; pass
+  applicable rules on when delegating (sub-agents do not see the memory); (2) the
+  **full body of every memory**, grouped feedback → user → project → reference.
+  **Budget** `BlockBudgetChars` = 12 000: past it, bodies are demoted to index
+  lines (`- name — description`, under "open with memory_read when relevant") —
+  `reference`/`project` first, then `feedback`/`user`, least recently `updated`
+  first within each, ties by name — until it fits; index lines are never dropped,
+  and when anything was demoted the block says so in one line after the rules
+  (`collmem.DemotedNote`). **GOTCHA — every type is inlined, not only
+  feedback/user, and the rules are imperative, because of the 2026-11-09 bench**
+  (`omnis-benches/reports/collection-memory-2026-11-09.md`): with the first
+  wording, `balanced`/`high` applied a correction in the turn but never saved it
+  (0/6), `high` twice said "c'est noté" without saving, and a `project` memory
+  injected as an index line was answered by its NAME ("integration-test-db")
+  instead of its content. Rewritten: balanced 8→13/15, high 7→15/15, premium
+  13→14/15 at the same cost. The **router** gets index lines only (every type, no
   rules, no bodies; `""` with no memories), under `routerCollectionCtxNote`.
   **General** — and CLI/TUI, where no resolver is installed — get General's
   memory (`memoryStoreFor`). Sub-agents get nothing. A **hidden** utility session
@@ -4022,6 +4031,14 @@ It replaced soft-skills (see "Soft-skills removed" at the end of this section).
   (memory dir, label, forRouter) on the directory's `*.md` entries (name, size,
   mtime), so the per-call cost is one `ReadDir`; a write costs one prompt-cache
   miss on the next call.
+- **Per-turn write cap** `maxMemoryWritesPerTurn` = 5 (`memory_save` +
+  `memory_delete` per (session, invocation), `writeBudget` in
+  [agent/memory_tools.go](agent/memory_tools.go)); past it the call is refused
+  with "memory was already updated in this turn: do not save again, answer the
+  user now". **Why:** with the imperative rule, `high` once called
+  `memory_save` 77 times in one turn ($0.95) — each save re-rendered the block
+  and the rule fired again on the same user message. Host-side guarantee, like
+  the routing tools' termination.
 - **Tools** ([agent/memory_tools.go](agent/memory_tools.go)) `memory_save(name,
   description, type, content)` (creates or replaces → `{ok, name, status:
   created|updated}`), `memory_read(name)`, `memory_delete(name)`. **Always on**

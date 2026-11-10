@@ -163,3 +163,21 @@ func TestMemoryToolsMountedOnAnsweringRootsOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestMemoryWritesAreCappedPerTurn(t *testing.T) {
+	w := &writeBudget{by: map[string]writeCount{}}
+	for i := 1; i <= maxMemoryWritesPerTurn; i++ {
+		if !w.allow("s", "inv-1") {
+			t.Fatalf("write %d must be allowed", i)
+		}
+	}
+	if w.allow("s", "inv-1") {
+		t.Fatal("a write past the cap in the same turn must be refused")
+	}
+	if !w.allow("other", "inv-1") {
+		t.Fatal("another session has its own budget")
+	}
+	if !w.allow("s", "inv-2") {
+		t.Fatal("a new turn starts a new budget")
+	}
+}

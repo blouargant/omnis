@@ -196,7 +196,7 @@ func TestInstructionsBlockPrecedesMemoryAndLegacyIsMigrated(t *testing.T) {
 	if strings.Contains(out, "<memory>") {
 		t.Error("the legacy <memory> section must be gone")
 	}
-	if !strings.Contains(out, "- imported-notes — ") {
+	if !strings.Contains(out, "### imported-notes — ") || !strings.Contains(out, "Old notes.") {
 		t.Error("legacy memory.md must be migrated on first use")
 	}
 }

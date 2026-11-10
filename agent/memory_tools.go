@@ -189,6 +189,42 @@ func memoryDelete(ctx context.Context, sessionID, name string) memoryDeleteOut {
 	return memoryDeleteOut{OK: true, Name: n}
 }
 
+// maxMemoryWritesPerTurn bounds memory_save + memory_delete calls in one run of a
+// session. The 2026-11-09 bench saw high call memory_save 77 times in one turn:
+// the injected block changed after each save and the rule "save a correction
+// before you answer" fired again on the same user message. A turn needs one or
+// two writes; past the cap the call is refused and the model is told to answer.
+const maxMemoryWritesPerTurn = 5
+
+const errTooManyWrites = "memory was already updated in this turn: do not save again, answer the user now"
+
+// writeBudget counts memory writes per (session, invocation). It keeps only the
+// latest invocation of each session, so it stays bounded by the session count.
+type writeBudget struct {
+	mu sync.Mutex
+	by map[string]writeCount
+}
+
+type writeCount struct {
+	inv string
+	n   int
+}
+
+var memoryWrites = &writeBudget{by: map[string]writeCount{}}
+
+// allow records one write and reports whether it is within the per-turn cap.
+func (w *writeBudget) allow(sessionID, invocationID string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	c := w.by[sessionID]
+	if c.inv != invocationID {
+		c = writeCount{inv: invocationID}
+	}
+	c.n++
+	w.by[sessionID] = c
+	return c.n <= maxMemoryWritesPerTurn
+}
+
 func mustMemoryTool[A, R any](name, desc string, h functiontool.Func[A, R]) tool.Tool {
 	t, err := functiontool.New(functiontool.Config{Name: name, Description: desc}, h)
 	if err != nil {
@@ -201,9 +237,13 @@ func mustMemoryTool[A, R any](name, desc string, h functiontool.Func[A, R]) tool
 func memoryTools() []tool.Tool {
 	return []tool.Tool{
 		mustMemoryTool("memory_save",
-			"Save or replace one memory of this collection. Use the name of an existing memory to replace it.",
+			"Save or replace one memory of this collection, so later conversations here know it. Call it whenever the user corrects you, states a lasting rule or fact, or asks you to remember something. Use the name of an existing memory to replace it.",
 			func(tc adk.ToolContext, in memorySaveIn) (memorySaveOut, error) {
-				return memorySave(tc, realSessionID(tc), in), nil
+				sid := realSessionID(tc)
+				if !memoryWrites.allow(sid, tc.InvocationID()) {
+					return memorySaveOut{OK: false, Name: in.Name, Error: errTooManyWrites}, nil
+				}
+				return memorySave(tc, sid, in), nil
 			}),
 		mustMemoryTool("memory_read",
 			"Read one memory of this collection in full.",
@@ -213,7 +253,11 @@ func memoryTools() []tool.Tool {
 		mustMemoryTool("memory_delete",
 			"Delete one memory of this collection.",
 			func(tc adk.ToolContext, in memoryDeleteIn) (memoryDeleteOut, error) {
-				return memoryDelete(tc, realSessionID(tc), in.Name), nil
+				sid := realSessionID(tc)
+				if !memoryWrites.allow(sid, tc.InvocationID()) {
+					return memoryDeleteOut{OK: false, Name: in.Name, Error: errTooManyWrites}, nil
+				}
+				return memoryDelete(tc, sid, in.Name), nil
 			}),
 	}
 }

@@ -30,13 +30,37 @@ func TestRenderAnsweringRoot(t *testing.T) {
 	s.Save("Proxy", Memory{Name: "no-force-push", Description: "Never force-push", Type: TypeFeedback, Body: "Rebase instead.\n**Why:** lost commits."})
 	s.Save("Proxy", Memory{Name: "release-date", Description: "Release freeze on 2026-12-01", Type: TypeProject, Body: "LONG PROJECT BODY"})
 	out := s.Render("Proxy", "Proxy", false)
-	for _, want := range []string{`<collection-memory collection="Proxy">`, "</collection-memory>", "memory_save", "Rebase instead.", "- release-date — Release freeze on 2026-12-01"} {
+	for _, want := range []string{`<collection-memory collection="Proxy">`, "</collection-memory>", "memory_save", "Rebase instead.",
+		"### release-date — Release freeze on 2026-12-01", "LONG PROJECT BODY", headProject} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "LONG PROJECT BODY") {
-		t.Error("project bodies must not be inlined")
+	if strings.Index(out, "Rebase instead.") > strings.Index(out, "LONG PROJECT BODY") {
+		t.Error("feedback must come before project facts")
+	}
+}
+
+// Over the budget, project and reference bodies are demoted before feedback,
+// even when the feedback is older.
+func TestRenderBudgetDemotesFactsBeforeCorrections(t *testing.T) {
+	s := In(t.TempDir())
+	big := strings.Repeat("x", 3900)
+	s.Save("", Memory{Name: "rule", Description: "old correction", Type: TypeFeedback, Body: "RULE " + big})
+	setUpdated(t, s, "", "rule", "2026-01-01")
+	for i := 0; i < 3; i++ {
+		s.Save("", Memory{Name: fmt.Sprintf("p%d", i), Description: fmt.Sprintf("fact %d", i), Type: TypeProject, Body: big})
+		setUpdated(t, s, "", fmt.Sprintf("p%d", i), "2026-06-01")
+	}
+	out := s.Render("", "General", false)
+	if len(out) > BlockBudgetChars {
+		t.Fatalf("block is %d chars", len(out))
+	}
+	if !strings.Contains(out, "RULE ") {
+		t.Errorf("the correction must stay inlined:\n%.400s", out)
+	}
+	if !strings.Contains(out, "- p0 — fact 0") {
+		t.Error("a project fact must fall back to an index line first")
 	}
 }
 
