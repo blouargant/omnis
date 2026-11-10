@@ -15,7 +15,7 @@ const BlockBudgetChars = 12000
 const Rules = `This is the memory of this collection: what earlier conversations here learned. Everything below is true unless the user says otherwise now. Apply it without being asked.
 
 You MUST call memory_save in the same turn, before you answer, when the user:
-- corrects you: how you work, what you produced, or a convention you got wrong ("no, always…", "in this project…", "not like that") — type "feedback": the rule, then **Why:** and **How to apply:**. Apply the correction now AND save it, or the next conversation repeats the mistake;
+- corrects you: how you work, what you produced, or a convention you got wrong ("no, always…", "in this project…", "not like that") — type "feedback": the rule, then **Why:** and **How to apply:**. Apply the correction now AND save it, or the next conversation repeats the mistake. Feedback on a draft is a correction too: "too long, titles are always under 6 words" is a rule to save, not only an edit to make;
 - tells you to remember something — type as fits;
 - confirms a choice of yours that was not obvious — type "feedback";
 - tells you who they are or a lasting preference — type "user";
@@ -24,7 +24,9 @@ You MUST call memory_save in the same turn, before you answer, when the user:
 
 Never say you have noted or will remember something unless you called memory_save in this turn: your words are not stored, only memory_save is.
 
-Save each subject once: after memory_save succeeds, do not call it again for the same thing — answer the user.
+Save each subject once: after memory_save succeeds, do not call it again for the same thing — answer the user. One memory per rule or fact: three style rules are three memories, not one catch-all.
+
+Use what is remembered: follow the rules below, and pitch every answer to what "About the user" says (their role, what they know and do not know).
 
 Before saving, look at the names below: if one covers the subject, save under that same name to replace it. When the user says to forget something, or a memory is wrong or outdated, call memory_delete or save the corrected version.
 

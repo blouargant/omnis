@@ -4098,6 +4098,27 @@ It replaced soft-skills (see "Soft-skills removed" at the end of this section).
   `omnis-benches/reports/memory-guard-2026-11-10.md`: injection kept 0/6 (was
   2/18), no real correction lost, memory_bench high 14/15, balanced 12/15
   (within noise of 15 and 13).
+- **Per-message reminder** (`appendMemoryReminder` /
+  `memoryTurnReminder`, [agent/collection_plugin.go](agent/collection_plugin.go)).
+  The rules sit at the top of a long system instruction and balanced/high
+  missed them: feedback on a draft ("too long, titles always under 6 words")
+  was never saved, and the stored profile was not used. The `collection_ctx`
+  callback therefore appends a short static reminder as the LAST part of every
+  typed user content of the request (call `memory_save` first when the message
+  corrects, criticises a draft, states a preference, says who the user is or
+  gives a lasting fact; one memory per rule; follow the memory and pitch the
+  answer to the profile). On every message, not only the latest, so the
+  request stays a stable prefix for the prompt cache; idempotent; never on a
+  tool result or the compression summary; last part, so `userWordsFromContents`
+  (first text part) never takes it for the user's words. ADK clones event
+  content per request, so the session is not modified. Skipped on the router,
+  hidden sessions and read-only (unattended) turns. `collmem.Rules` also gained
+  "feedback on a draft is a correction", "one memory per rule" and "use what
+  is remembered". Benched (`omnis-benches/reports/memory-remind-2026-11-10.md`):
+  newsletter overall high 6.3 → 7.7, balanced 2.0 → 5.7; orders-api high
+  8.7 → 9.0, balanced 6.0 → 8.0; memory_bench high 15/15, balanced 14/15.
+  Cost: high now saves a one-off outing as a project memory in 2/3 newsletter
+  runs.
 - **Routes** ([server/collection_memories.go](server/collection_memories.go),
   owner-scoped via `userRoot(requestLogin(c))`): `GET /api/collections/:name/memories`
   → `{memories}`, `PUT …/memories/:mem` `{description, type, body}` →

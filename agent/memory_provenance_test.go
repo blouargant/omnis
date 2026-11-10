@@ -99,3 +99,40 @@ func TestCheckProvenanceFailsOpen(t *testing.T) {
 		t.Fatal("a NO must refuse")
 	}
 }
+
+// The reminder goes on every typed user message (stable prefix for the prompt
+// cache), never on a tool result or the compression summary, never twice, and
+// never where userWordsFromContents would take it for the user's words.
+func TestAppendMemoryReminder(t *testing.T) {
+	contents := []*genai.Content{
+		content("user", &genai.Part{Text: "## Compressed history (auto-generated)\n…"}),
+		content("user", &genai.Part{Text: "Écris un titre."}),
+		content("model", &genai.Part{Text: "« Le grand automne des Sentiers ! »"}),
+		content("user", &genai.Part{Text: "Trop long, jamais de point d'exclamation."},
+			&genai.Part{Text: "===== FILE: notes.md ====="}),
+		content("model", &genai.Part{FunctionCall: &genai.FunctionCall{Name: "Read"}}),
+		content("user", &genai.Part{FunctionResponse: &genai.FunctionResponse{Name: "Read"}}),
+	}
+	appendMemoryReminder(contents)
+	appendMemoryReminder(contents)
+	has := func(c *genai.Content) int {
+		n := 0
+		for _, p := range c.Parts {
+			if p.Text == memoryTurnReminder {
+				n++
+			}
+		}
+		return n
+	}
+	for i, want := range []int{0, 1, 0, 1, 0, 0} {
+		if got := has(contents[i]); got != want {
+			t.Errorf("content %d carries the reminder %d times, want %d", i, got, want)
+		}
+	}
+	if last := contents[3].Parts[len(contents[3].Parts)-1]; last.Text != memoryTurnReminder {
+		t.Error("the reminder must be the last part")
+	}
+	if user, _ := userWordsFromContents(contents); strings.Contains(strings.Join(user, "|"), "Memory —") {
+		t.Fatalf("the reminder was taken for the user's words: %q", user)
+	}
+}

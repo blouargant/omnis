@@ -7,6 +7,7 @@ import (
 	"google.golang.org/adk/v2/agent/llmagent"
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/adk/v2/plugin"
+	"google.golang.org/genai"
 
 	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/internal/collectionctx"
@@ -207,5 +208,43 @@ func injectCollectionCtx(ctx adk.CallbackContext, req *model.LLMRequest, forRout
 	}
 	// Reuse the AGENT.md prepend helper (same package) — identical shape.
 	prependAgentMD(req, collectionCtxBlock(ctx.SessionID(), forRouter))
+	if !forRouter && !sessionHidden(ctx.SessionID()) && !memoryReadOnly(ctx) {
+		appendMemoryReminder(req.Contents)
+	}
 	return nil, nil
+}
+
+// memoryTurnReminder is added to every user message of an answering root's
+// request. The rules sit at the top of a long system instruction, and the
+// 2026-11-10 quality bench (omnis-benches reports/memory-quality-2026-11-10.md)
+// showed high and balanced missing them where it mattered: feedback on a draft
+// ("too long — titles are always under 6 words") never saved (0/6), and a
+// stored profile ignored in the answer. A short note next to the user's words
+// is what a weaker model reads. Static text on EVERY user message, not only the
+// latest, so the request stays a stable prefix for the prompt cache.
+const memoryTurnReminder = "[Memory — before you answer: if this message corrects or criticises your work " +
+	"(feedback on a draft counts: \"too long\", \"always…\", \"never…\"), states a preference, " +
+	"says who the user is, or gives a lasting fact, call memory_save first, one memory per rule. " +
+	"Then follow the collection memory in your answer and pitch it to the user's profile.]"
+
+// appendMemoryReminder adds memoryTurnReminder to each user message: a user
+// content whose first part is non-empty text (a typed prompt, a steering note
+// turn), never a tool-result content and never the compression summary. The
+// reminder is the last part, so userWordsFromContents (first text part) never
+// takes it for the user's words. Idempotent.
+func appendMemoryReminder(contents []*genai.Content) {
+	for _, c := range contents {
+		if c == nil || c.Role != "user" || len(c.Parts) == 0 {
+			continue
+		}
+		first := c.Parts[0]
+		if first == nil || first.FunctionResponse != nil || strings.TrimSpace(first.Text) == "" ||
+			strings.Contains(first.Text, compressedHistoryMarker) {
+			continue
+		}
+		if last := c.Parts[len(c.Parts)-1]; last != nil && last.Text == memoryTurnReminder {
+			continue
+		}
+		c.Parts = append(c.Parts, &genai.Part{Text: memoryTurnReminder})
+	}
 }
