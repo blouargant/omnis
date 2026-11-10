@@ -4106,7 +4106,8 @@ It replaced soft-skills (see "Soft-skills removed" at the end of this section).
   callback therefore appends a short static reminder as the LAST part of every
   typed user content of the request (call `memory_save` first when the message
   corrects, criticises a draft, states a preference, says who the user is or
-  gives a lasting fact; one memory per rule; follow the memory and pitch the
+  gives a fact later conversations will need, never the details of the task
+  at hand — one event's date/place/time, one draft's content; one memory per rule; follow the memory and pitch the
   answer to the profile). On every message, not only the latest, so the
   request stays a stable prefix for the prompt cache; idempotent; never on a
   tool result or the compression summary; last part, so `userWordsFromContents`
@@ -4117,8 +4118,15 @@ It replaced soft-skills (see "Soft-skills removed" at the end of this section).
   is remembered". Benched (`omnis-benches/reports/memory-remind-2026-11-10.md`):
   newsletter overall high 6.3 → 7.7, balanced 2.0 → 5.7; orders-api high
   8.7 → 9.0, balanced 6.0 → 8.0; memory_bench high 15/15, balanced 14/15.
-  Cost: high now saves a one-off outing as a project memory in 2/3 newsletter
-  runs.
+  The first wording ("a lasting fact") made high save a one-off outing as a
+  project memory in 2/3 newsletter runs; naming "the details of the task at
+  hand" in the reminder and in `Rules` fixed it (precision 1.00 on all six
+  high conversations, newsletter 7.7 → 8.7,
+  `omnis-benches/reports/memory-narrow-2026-11-10.md`). **Known issue:** since
+  the reminder, balanced intermittently writes until the 32,768-token output
+  limit (0/42 bench steps before, ~6/102 after); not reproduced by hand, cause
+  not yet captured. The reminder says nothing about `memory_delete`, and
+  balanced's `forget` fails 2/6.
 - **Routes** ([server/collection_memories.go](server/collection_memories.go),
   owner-scoped via `userRoot(requestLogin(c))`): `GET /api/collections/:name/memories`
   → `{memories}`, `PUT …/memories/:mem` `{description, type, body}` →
