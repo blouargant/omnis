@@ -367,6 +367,8 @@ func buildCapabilityCheckPrompt(squadDesc, request string) string {
 	if d := strings.TrimSpace(squadDesc); d != "" {
 		b.WriteString("Your squad's stated purpose: " + d + "\n\n")
 	}
+	b.WriteString("Every squad can save, read and delete the collection's memories: a request that only " +
+		"asks to remember, correct or forget a fact is within your scope.\n\n")
 	b.WriteString("Request to judge:\n")
 	b.WriteString(request)
 	b.WriteString("\n\nReply with EXACTLY one line, beginning with `CAN_HANDLE:` or `CANNOT_HANDLE:` " +

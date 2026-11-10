@@ -16,8 +16,13 @@ import (
 // whole would hit the same limit.
 const CutToolCallNudge = "Your previous reply reached the output limit%s while writing the arguments of a `%s` call, so the call was cut off and did not run. Nothing was changed. Do it again in smaller steps: one tool call per file, and for a long file write a first part with Write, then add the rest with further Edit calls. Keep each call's arguments well under that size."
 
+// EmptyCutNudge is appended as a user turn when RetryCutToolCall re-sends a
+// request whose reply reached the output limit without writing anything.
+const EmptyCutNudge = "Your previous attempt reached the output limit while reasoning and wrote nothing. Answer now, directly, without long deliberation."
+
 // RetryCutToolCall wraps an LLM so a reply that stops at the output limit
-// while it is writing a tool call does not end the turn.
+// while it is writing a tool call, or before writing anything, does not end
+// the turn.
 //
 // The adapters' markTruncated drops such a call (its arguments are cut
 // mid-JSON) and appends a notice. The reply then has no tool call, so ADK's
@@ -29,8 +34,13 @@ const CutToolCallNudge = "Your previous reply reached the output limit%s while w
 // request is re-sent once with CutToolCallNudge. A second cut reply is
 // returned as it is, notice included.
 //
-// Inert for requests that declare no tools. Known limit: text the first
-// attempt streamed before the call stays on screen and the retry may repeat it.
+// A reply cut with no text and no tool call is the model reasoning until the
+// limit: seen on the router with Balanced, 32,768 output tokens and 170 s for
+// nothing, the turn then showing only the notice. It is re-sent once with
+// reasoning off (ThinkingBudget 0) and EmptyCutNudge.
+//
+// Known limit: text the first attempt streamed before the call stays on screen
+// and the retry may repeat it.
 func RetryCutToolCall(inner model.LLM) model.LLM {
 	if inner == nil {
 		return nil
@@ -46,19 +56,29 @@ type cutCallRetry struct{ inner model.LLM }
 func (g *cutCallRetry) Name() string { return g.inner.Name() }
 
 func (g *cutCallRetry) GenerateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {
-	if !declaresTools(req) {
-		return g.inner.GenerateContent(ctx, req, stream)
-	}
 	return func(yield func(*model.LLMResponse, error) bool) {
 		cut, stopped := g.attempt(ctx, req, stream, true, yield)
 		if cut == nil || stopped {
 			return
 		}
-		log.Printf("llm: %s reply cut while writing a %s call; retrying once in smaller steps", g.inner.Name(), cut.name)
 		retry := *req
+		nudge := EmptyCutNudge
+		if cut.empty {
+			log.Printf("llm: %s reached the output limit without writing anything; retrying once without reasoning", g.inner.Name())
+			cfg := genai.GenerateContentConfig{}
+			if req.Config != nil {
+				cfg = *req.Config
+			}
+			zero := int32(0)
+			cfg.ThinkingConfig = &genai.ThinkingConfig{ThinkingBudget: &zero}
+			retry.Config = &cfg
+		} else {
+			log.Printf("llm: %s reply cut while writing a %s call; retrying once in smaller steps", g.inner.Name(), cut.name)
+			nudge = cutNudge(cut)
+		}
 		retry.Contents = append(append([]*genai.Content(nil), req.Contents...), &genai.Content{
 			Role:  "user",
-			Parts: []*genai.Part{{Text: cutNudge(cut)}},
+			Parts: []*genai.Part{{Text: nudge}},
 		})
 		g.attempt(ctx, &retry, stream, false, yield)
 	}
@@ -67,6 +87,7 @@ func (g *cutCallRetry) GenerateContent(ctx context.Context, req *model.LLMReques
 type cutCall struct {
 	name   string
 	tokens int32
+	empty  bool // nothing written: no text, no tool call
 }
 
 func cutNudge(c *cutCall) string {
@@ -91,7 +112,10 @@ func (g *cutCallRetry) attempt(ctx context.Context, req *model.LLMRequest, strea
 			continue
 		}
 		if allowRetry && resp != nil && !resp.Partial {
-			if name, ok := resp.CustomMetadata[cutToolCallKey].(string); ok && name != "" {
+			if resp.CustomMetadata[emptyCutKey] == true {
+				return &cutCall{empty: true}, false
+			}
+			if name, ok := resp.CustomMetadata[cutToolCallKey].(string); ok && name != "" && declaresTools(req) {
 				c := &cutCall{name: name}
 				if resp.UsageMetadata != nil {
 					c.tokens = resp.UsageMetadata.CandidatesTokenCount

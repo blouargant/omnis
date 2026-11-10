@@ -1683,7 +1683,11 @@ the CLI auto-continue above still covers it. A reply cut in plain text (no call
 dropped) is not retried here. Inert for requests without tools. Known limit: text
 streamed before the call stays on screen. Verified live (deepseek-v4.1-flash,
 `max_output_tokens` 900, a 400-line file): the first reply was cut in the `Write`,
-the retry wrote a 185-line first part and stopped normally. Pinned by
+the retry wrote a 185-line first part and stopped normally. **A reply cut with nothing written** (no text, no tool call — the model reasoned
+until the limit; `markTruncated` tags it `omnis_empty_cut`) is re-sent once by
+the same wrapper with reasoning off (`ThinkingBudget` 0) and `EmptyCutNudge`,
+for any request, tools or not. Seen on the router with Balanced: 32,768 output
+tokens in ~170 s, the turn then showing only the notice. Pinned by
 [core/llm/cutcall_test.go](core/llm/cutcall_test.go).
 
 ### Read-only agents (`read_only`, Landlock sandbox)
@@ -4122,11 +4126,15 @@ It replaced soft-skills (see "Soft-skills removed" at the end of this section).
   project memory in 2/3 newsletter runs; naming "the details of the task at
   hand" in the reminder and in `Rules` fixed it (precision 1.00 on all six
   high conversations, newsletter 7.7 → 8.7,
-  `omnis-benches/reports/memory-narrow-2026-11-10.md`). **Known issue:** since
-  the reminder, balanced intermittently writes until the 32,768-token output
-  limit (0/42 bench steps before, ~6/102 after); not reproduced by hand, cause
-  not yet captured. The reminder says nothing about `memory_delete`, and
-  balanced's `forget` fails 2/6.
+  `omnis-benches/reports/memory-narrow-2026-11-10.md`). The "balanced writes
+  until 32,768 tokens" failures seen in those benches were the **router**, not
+  the reminder: on "retiens / oublie …" it probed squads with `ask_squad`, each
+  declined (a probed lead sees its instruction, not its memory tools), and the
+  router then reasoned until the output limit (~170 s, empty reply). Fixed by
+  a routing heuristic in the omnis instruction (route remember/forget requests
+  at once) and a memory note in `buildCapabilityCheckPrompt`, plus the empty-cut
+  retry in `llm.RetryCutToolCall`; balanced memory_bench 11/15 → 27/30, no cut
+  in 30 runs (`omnis-benches/reports/memory-routerloop-2026-11-10.md`).
 - **Routes** ([server/collection_memories.go](server/collection_memories.go),
   owner-scoped via `userRoot(requestLogin(c))`): `GET /api/collections/:name/memories`
   → `{memories}`, `PUT …/memories/:mem` `{description, type, body}` →

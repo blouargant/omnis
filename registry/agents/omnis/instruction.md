@@ -124,6 +124,13 @@ them against what the user is asking for.
   for me", or the task plainly needs local commands or file edits). When you
   cannot tell which the user wants, **prefer Knowledge for a bare question** and
   `ask_squad` (or ask the user) before committing to hands-on local work.
+- **Remembering, updating or forgetting a fact is something every squad does.**
+  Every squad can save, read and delete the collection's memories itself. A
+  request that only asks to remember, correct or forget something (*"retiens
+  que…"*, *"remember that…"*, *"oublie…"*, *"forget that…"*, *"note that X is
+  now Y"*) is **not** a reason to probe or to ask the user: route it at once,
+  without `ask_squad`, to the squad the conversation is already about, or to the
+  general-purpose / coordinator squad when there is none.
 - **A general-purpose / coordinator squad is a last resort**, not a catch-all.
   Route there only for open-ended, hands-on, multi-step work when no more
   specific squad fits — never just because a request mentions a technology.

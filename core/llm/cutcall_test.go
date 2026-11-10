@@ -144,3 +144,50 @@ func TestCutWithoutToolsOrToolCallPassesThrough(t *testing.T) {
 		t.Fatalf("calls=%d text=%q", len(inner.reqs), joinedText(out))
 	}
 }
+
+// emptyCutReply is a reply cut at the limit with nothing written: the model
+// reasoned until the output limit (the router on Balanced).
+func emptyCutReply() []*model.LLMResponse {
+	final := &model.LLMResponse{
+		FinishReason:  genai.FinishReasonMaxTokens,
+		UsageMetadata: &genai.GenerateContentResponseUsageMetadata{CandidatesTokenCount: 32768},
+		Content:       &genai.Content{Role: "model"},
+	}
+	notice := markTruncated("m", final)
+	return []*model.LLMResponse{noticePartial(notice), final}
+}
+
+func TestEmptyCutIsRetriedWithoutReasoning(t *testing.T) {
+	for _, req := range []*model.LLMRequest{toolsReq(), {Contents: toolsReq().Contents}} {
+		inner := &cutScriptLLM{script: [][]*model.LLMResponse{emptyCutReply(), okReply()}}
+		out := collectCut(t, RetryCutToolCall(inner).GenerateContent(context.Background(), req, true))
+		if len(inner.reqs) != 2 {
+			t.Fatalf("want one retry, got %d calls", len(inner.reqs))
+		}
+		if strings.Contains(joinedText(out), TruncationNoticePrefix) {
+			t.Fatal("the empty attempt's notice must not reach the caller")
+		}
+		r := inner.reqs[1]
+		if tc := r.Config.ThinkingConfig; tc == nil || tc.ThinkingBudget == nil || *tc.ThinkingBudget != 0 {
+			t.Fatal("the retry must turn reasoning off")
+		}
+		if last := r.Contents[len(r.Contents)-1].Parts[0].Text; last != EmptyCutNudge {
+			t.Fatalf("retry nudge = %q", last)
+		}
+		if req.Config != nil && req.Config.ThinkingConfig != nil {
+			t.Fatal("the caller's config must not be modified")
+		}
+	}
+}
+
+// A reply cut after writing text is a real answer that ran long: not retried.
+func TestCutReplyWithTextIsNotRetried(t *testing.T) {
+	final := &model.LLMResponse{FinishReason: genai.FinishReasonMaxTokens,
+		Content: &genai.Content{Role: "model", Parts: []*genai.Part{{Text: "A long answer…"}}}}
+	markTruncated("m", final)
+	inner := &cutScriptLLM{script: [][]*model.LLMResponse{{final}}}
+	collectCut(t, RetryCutToolCall(inner).GenerateContent(context.Background(), toolsReq(), false))
+	if len(inner.reqs) != 1 {
+		t.Fatalf("want no retry, got %d calls", len(inner.reqs))
+	}
+}

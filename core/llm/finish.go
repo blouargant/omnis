@@ -3,6 +3,7 @@ package llm
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"google.golang.org/genai"
 
@@ -90,6 +91,13 @@ func markTruncated(modelName string, r *model.LLMResponse) string {
 		kept = append(kept, p)
 	}
 	r.Content.Parts = kept
+	empty := !dropped
+	for _, p := range kept {
+		if p != nil && (p.FunctionCall != nil || strings.TrimSpace(p.Text) != "") {
+			empty = false
+			break
+		}
+	}
 	var out int32
 	if r.UsageMetadata != nil {
 		out = r.UsageMetadata.CandidatesTokenCount
@@ -104,6 +112,12 @@ func markTruncated(modelName string, r *model.LLMResponse) string {
 		}
 		r.CustomMetadata[cutToolCallKey] = cutName
 	}
+	if empty {
+		if r.CustomMetadata == nil {
+			r.CustomMetadata = map[string]any{}
+		}
+		r.CustomMetadata[emptyCutKey] = true
+	}
 	r.Content.Parts = append(r.Content.Parts, &genai.Part{Text: notice})
 	mergeTextParts(r.Content)
 	log.Printf("llm: %s reply cut at the output limit (%d tokens, unfinished tool call dropped: %v)", modelName, out, dropped)
@@ -113,6 +127,11 @@ func markTruncated(modelName string, r *model.LLMResponse) string {
 // cutToolCallKey, in a final response's CustomMetadata, names the tool call
 // markTruncated dropped because its arguments were cut (RetryCutToolCall).
 const cutToolCallKey = "omnis_cut_tool_call"
+
+// emptyCutKey, in a final response's CustomMetadata, marks a reply cut at the
+// output limit that holds no text and no tool call: the model spent its whole
+// output budget reasoning (RetryCutToolCall re-sends it with reasoning off).
+const emptyCutKey = "omnis_empty_cut"
 
 // truncationNoticeKey marks the partial that carries the truncation notice
 // while streaming, so RetryCutToolCall can withhold it when it retries.
