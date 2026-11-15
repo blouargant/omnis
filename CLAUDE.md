@@ -7681,7 +7681,9 @@ that ends up hidden is never flashed in. Cards: Environnement (squad, folder, gi
 branch, collection), Contexte (`ctxUsageInfo`), Skills (from `sessionSkills`), Memory (the session's collection memories, hidden when none — see "Collection memory"),
 Connecteurs (`GET /api/sessions/:id/mcp` — squad's MCP servers via
 `Manager.SquadMCPServers` + `mcp.Pool.Status()`, never connects), Résultats
-(`GET …/produced`; files a `Write` CREATED — `WriteOut.Created`, recorded in
+(`GET …/produced`; files a successful `Write` wrote — created or rewritten in
+full (`producedByWrite`; a report a later chat produces again under the same
+name overwrites it, and it must still show); `Edit`s are not results — recorded in
 `ConversationFile.Produced`, `produced_changed` event), Modifications (`GET …/git`,
 [server/git_status.go](server/git_status.go), 5 s timeout, untracked files
 included), Background tasks (the session's `bash_background` / `monitor` tasks,

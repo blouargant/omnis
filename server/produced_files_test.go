@@ -103,8 +103,11 @@ func TestProducedFromWriteResponse(t *testing.T) {
 	if !producedByWrite("Write", map[string]any{"result": "wrote x", "created": true}) {
 		t.Fatal("a Write that created the file must be recorded")
 	}
-	if producedByWrite("Write", map[string]any{"result": "wrote x"}) {
-		t.Fatal("an overwrite must not be recorded")
+	if !producedByWrite("Write", map[string]any{"result": "wrote x (2 bytes; snapshot saved - call revert to undo)"}) {
+		t.Fatal("a Write that rewrote an existing file must be recorded too")
+	}
+	if producedByWrite("Write", map[string]any{"result": "Error writing x: permission denied"}) {
+		t.Fatal("a failed Write must not be recorded")
 	}
 	if producedByWrite("Edit", map[string]any{"created": true}) {
 		t.Fatal("only Write records produced files")

@@ -86,8 +86,10 @@ type WriteIn struct {
 }
 type WriteOut struct {
 	Result string `json:"result"`
-	// Created is true when the write made a new file (it did not exist before);
-	// the web UI lists created files in the environment panel's Résultats card.
+	// Created is true when the write made a new file (it did not exist before).
+	// The Résultats card lists every successful Write, created or rewritten
+	// (server producedByWrite); this flag stays for callers that need the
+	// distinction.
 	Created bool `json:"created,omitempty"`
 }
 

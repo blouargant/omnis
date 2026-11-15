@@ -19,14 +19,19 @@ import (
 // tests ⇒ the file is only persisted.
 var producedChangedHook func(sessionID string)
 
-// producedByWrite reports whether a tool result is a Write that created a new
-// file (core/tools sets `created` when the path did not exist before).
+// producedByWrite reports whether a tool result is a successful Write: a file
+// the agent wrote in full — new, or rewritten (a report produced again under
+// the same name by a later chat overwrites the earlier one, and it is still
+// this chat's result). Partial edits (Edit, MultiEdit) are not results.
 func producedByWrite(tool string, resp map[string]any) bool {
 	if !strings.EqualFold(tool, "write") || resp == nil {
 		return false
 	}
-	created, _ := resp["created"].(bool)
-	return created
+	if created, _ := resp["created"].(bool); created {
+		return true
+	}
+	res, _ := resp["result"].(string)
+	return strings.HasPrefix(res, "wrote ")
 }
 
 // recordProducedFile persists a file the agent created and notifies browsers.
