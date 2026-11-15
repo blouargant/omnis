@@ -7729,7 +7729,13 @@ owner-checked in cookie mode).
   (office, archives, media) and files over 2 MB or containing NUL get a
   download note. A `previewSeq` drops stale fetches.
 - **Entry points**: produced-file paths in replies (`makePathPreviewable` on the
-  `.dl-path` spans of `linkifyFilePaths` — the download button stays), the
+  `.dl-path` spans of `linkifyFilePaths` — the download button stays; an
+  absolute path anywhere, or a **relative** inline-code path such as
+  `` `report.md` `` that names a file of the session's produced list —
+  `REL_FILE_PATH_RE` + `matchProduced` over `sessionProduced`, cached per session
+  and dropped on `produced_changed`; agents usually name what they wrote
+  relative to the working folder, and limiting relative names to produced files
+  keeps a coding chat's `src/main.go` mentions plain), the
   Results card rows, `@file` links to files (directories still open a browser
   tab), the Files browser menu (**Preview**).
 - **Live**: `onAgentFileChanged` → `refreshFilePreviewFor` re-renders the shown

@@ -4163,6 +4163,31 @@ const DOWNLOAD_ICON_SVG =
 // global form) extracts such paths embedded in prose text.
 const ABS_FILE_PATH_RE = /^(?:[A-Za-z]:[\\/]|\/)[^\s'"<>()[\]]+\.[A-Za-z0-9]{1,12}$/;
 const EMBED_FILE_PATH_RE = /(?:[A-Za-z]:[\\/]|\/)[^\s'"<>()[\]]+\.[A-Za-z0-9]{1,12}/g;
+// A RELATIVE path in an inline-code span (`report.md`, `out/summary.md`). These
+// are decorated only when they name a file the session produced (the Résultats
+// list), so a coding chat's `src/main.go` mentions stay plain text.
+const REL_FILE_PATH_RE = /^(?:\.\/)?[\w.-]+(?:\/[\w.-]+)*\.[A-Za-z0-9]{1,12}$/;
+
+// sessionProduced caches each session's produced files (GET …/produced) for
+// matching relative names; dropped on produced_changed.
+const producedCache = new Map(); // session id → Promise<[{path, exists}]>
+function sessionProduced(sessionId) {
+  if (!producedCache.has(sessionId)) {
+    producedCache.set(sessionId, apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/produced`)
+      .then((r) => (r.ok ? r.json() : { files: [] }))
+      .then((d) => d.files || [])
+      .catch(() => { producedCache.delete(sessionId); return []; }));
+  }
+  return producedCache.get(sessionId);
+}
+
+// matchProduced finds the produced file a relative name designates: the same
+// path ending (`out/summary.md` matches `/home/x/out/summary.md`).
+function matchProduced(files, rel) {
+  const r = rel.replace(/^\.\//, "");
+  const hits = files.filter((f) => f.exists && (f.path === r || f.path.endsWith("/" + r)));
+  return hits.length ? hits[hits.length - 1].path : null; // latest write wins
+}
 
 // makeInlineDlBtn builds the small download button placed after a produced-file
 // path; clicking it downloads the file through the session's folder route.
@@ -4198,16 +4223,33 @@ function linkifyFilePaths(rootEl) {
   const sessionId = (ownerPanel && ownerPanel.sessionId) || sessionIdOfNode(rootEl) || activeSessionId;
   if (!sessionId) return;
 
-  // Pass 1 — inline code spans whose entire text is an absolute file path.
+  // Pass 1 — inline code spans whose entire text is an absolute file path, or a
+  // relative one (checked against the session's produced files below).
   const codeTargets = [];
+  const relTargets = [];
   rootEl.querySelectorAll("code").forEach(code => {
     if (code.closest("pre")) return;        // skip fenced code blocks (snippets)
     if (code.dataset.dlChecked) return;     // idempotent across repeat calls
     const p = (code.textContent || "").trim();
-    if (!ABS_FILE_PATH_RE.test(p)) return;
-    code.dataset.dlChecked = "1";
-    codeTargets.push({ code, path: p });
+    if (ABS_FILE_PATH_RE.test(p)) {
+      code.dataset.dlChecked = "1";
+      codeTargets.push({ code, path: p });
+    } else if (REL_FILE_PATH_RE.test(p)) {
+      code.dataset.dlChecked = "1";
+      relTargets.push({ code, rel: p });
+    }
   });
+  if (relTargets.length) {
+    sessionProduced(sessionId).then((files) => {
+      for (const { code, rel } of relTargets) {
+        const abs = matchProduced(files, rel);
+        if (!abs || !code.parentNode) continue;
+        code.classList.add("dl-path");
+        makePathPreviewable(code, abs, sessionId);
+        code.insertAdjacentElement("afterend", makeInlineDlBtn(abs, sessionId));
+      }
+    });
+  }
 
   // Pass 2 — absolute paths embedded in prose text nodes (not inside code/pre/
   // links/already-decorated paths). Snapshot the matches now; mutate after the
@@ -9759,6 +9801,7 @@ async function subscribeGlobalEvents() {
           // sidebar button without waiting for a page reload.
           checkForUpdate();
         } else if (event === "produced_changed" && sid) {
+          producedCache.delete(sid);
           // An agent created a file in this session — refresh the Résultats card.
           if (sid === activeSessionId && window.EnvPanel) EnvPanel.refresh("results");
         } else if (event === "memory_changed") {
