@@ -143,6 +143,26 @@ context use (with **Compress now**), loaded skills, MCP connectors, files the
 agent created (with a download button), git changes, the agent's **background
 tasks** (running ones with their time and a stop button, finished ones under
 "Finished"; click one to see its output), and the file browser.
+## File preview
+
+A file the conversation produced can be shown in the right-hand column, next
+to the chat, like an artifact in Claude Desktop. Open it by clicking:
+
+- a file path the agent gives in its reply (underlined with dots; the small
+  download button beside it still downloads),
+- a file in the panel's **Results** card,
+- an `@file` reference in a message,
+- **Preview** in a file's right-click menu in the Files browser.
+
+Markdown is shown rendered (tables, code blocks), images and SVG as images,
+PDF in the browser's PDF viewer, HTML as a page (sandboxed: no scripts), and
+any other text file as code with line numbers. The header has buttons to show
+the source of a Markdown, HTML or SVG file, open it in the editor, copy its
+content, download it and close the preview. The preview follows the file: when
+the agent rewrites it, it is shown again. Each chat keeps its own preview;
+opening the terminal or the environment panel takes the column back. Office
+documents and archives cannot be previewed and are offered as a download.
+
 Tool calls appear in the chat as one grey line ("Ran 1 command, used 2 tools");
 click it to see each call, and click a call to see its arguments and result.
 

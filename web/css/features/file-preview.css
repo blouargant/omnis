@@ -1,0 +1,171 @@
+/* File preview dock: a file the conversation produced (Markdown, image, PDF,
+   HTML, code…), shown in the chat's right column (Claude Desktop style) —
+   docked in the rightmost pane by placeEnvPanel (app.js "File preview dock")
+   and replacing the environment panel and the terminal while shown. Also the
+   clickable produced-file paths in replies (.dl-path-preview).
+   Part of web/css/styles.css — edit this partial, not the @import barrel. */
+
+:root { --file-dock-w: 560px; }
+/* Never more than 60% of the pane, so a narrow window keeps room for the chat.
+   Width and the chat's margin both resolve % against the pane. */
+:root { --file-dock-col: min(var(--file-dock-w), 60%); }
+
+#file-dock {
+  display: none;
+  flex-direction: column;
+  position: absolute;
+  top: var(--topbar-h);
+  right: 0;
+  bottom: 0;
+  width: var(--file-dock-col);
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  z-index: 5;
+}
+body.file-shown #file-dock { display: flex; }
+/* Imported after env-panel.css and terminal.css: the preview wins the column. */
+body.file-shown #env-panel,
+body.file-shown #term-dock { display: none; }
+body.file-shown .chat-pane.env-host > :not(.pane-tabbar):not(#env-panel):not(#term-dock):not(#file-dock) {
+  margin-right: var(--file-dock-col);
+}
+
+.file-dock-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 1;
+}
+.file-dock-resize::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.12s;
+}
+.file-dock-resize:hover::before,
+.file-dock-resize.is-dragging::before { background: var(--accent); }
+
+.file-dock-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+.file-dock-icon { display: inline-flex; flex: none; }
+.file-dock-icon svg { display: block; }
+.file-dock-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text-strong);
+}
+.file-dock-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.file-dock-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.file-dock-actions button[hidden] { display: none; }
+.file-dock-actions button:hover { background: var(--bg-raised-hover); color: var(--text); }
+.file-dock-actions button.active { background: var(--bg-active); color: var(--text-strong); }
+
+.file-dock-body {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+}
+.file-dock-loading,
+.file-dock-note {
+  padding: 24px 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.file-dock-note p { margin: 0 0 12px; }
+.file-dock-note-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.file-dock-note-btn:hover { background: var(--bg-raised); }
+
+.file-dock-view { min-height: 100%; }
+/* Markdown: the reply typography, without the bubble's column cap. */
+.file-dock-markdown { padding: 20px 24px 32px; }
+.file-dock-md { max-width: none; width: 100%; }
+.file-dock-image {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 16px;
+}
+.file-dock-image img { max-width: 100%; height: auto; }
+.file-dock-pdf,
+.file-dock-html { display: flex; height: 100%; }
+.file-dock-pdf iframe,
+.file-dock-html iframe {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+/* HTML renders on white, like a browser page. */
+.file-dock-html iframe { background: #fff; }
+.file-dock-code {
+  display: flex;
+  margin: 0;
+  padding: 12px 0;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre;
+}
+.file-dock-gutter {
+  flex: none;
+  padding: 0 12px 0 14px;
+  text-align: right;
+  color: var(--text-faint);
+  user-select: none;
+}
+.file-dock-code code { padding-right: 16px; font: inherit; background: none; }
+
+/* Produced-file paths in replies open the preview. */
+.dl-path-preview { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.dl-path-preview:hover { text-decoration-style: solid; }
+
+/* Small screens: the preview covers the chat; placeEnvPanel keeps it in <body>. */
+@media (max-width: 820px) {
+  #file-dock {
+    position: fixed;
+    inset: 0;
+    width: auto;
+    border-left: none;
+    z-index: 62;
+  }
+  .file-dock-resize { display: none; }
+}

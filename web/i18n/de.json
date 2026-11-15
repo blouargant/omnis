@@ -1061,5 +1061,18 @@
   "pinned.label": "Angeheftet",
   "pinned.failed": "Anheften konnte nicht geändert werden",
   "menu.pin": "Anheften",
-  "menu.unpin": "Lösen"
+  "menu.unpin": "Lösen",
+  "preview.label": "Dateivorschau",
+  "preview.source": "Quelltext anzeigen",
+  "preview.rendered": "Gerenderte Ansicht anzeigen",
+  "preview.edit": "Im Editor öffnen",
+  "preview.copy": "Inhalt kopieren",
+  "preview.copied": "Kopiert",
+  "preview.close": "Vorschau schließen",
+  "preview.loading": "Wird geladen…",
+  "preview.noPreview": "Keine Vorschau für diesen Dateityp.",
+  "preview.missing": "Diese Datei kann nicht gelesen werden: {path}",
+  "preview.tooLarge": "Diese Datei ist für eine Vorschau zu groß.",
+  "preview.menu": "Vorschau",
+  "preview.open": "In der Vorschau anzeigen"
 }

@@ -75,6 +75,7 @@ same colour/size in multiple partials.
 | `panes.css` | Chat-pane layout, pane dividers, per-pane tab bar / tabs, empty-pane picker |
 | `editor.css` | Monaco file-editor tabs (`.pane-editor`, `.monaco-*`) |
 | `terminal.css` | **Terminal dock**: the session's xterm.js terminals in the chat's right column (`#term-dock`, `.term-dock-*`, `--term-dock-w`), replacing the environment panel while shown (`body.term-shown`); full-screen sheet below 820px |
+| `file-preview.css` | **File preview dock**: a produced file shown in the chat's right column (`#file-dock`, `.file-dock-*`, `--file-dock-w` capped at 60% of the pane by `--file-dock-col`), replacing the environment panel and the terminal while shown (`body.file-shown`); the clickable produced-file paths in replies (`.dl-path-preview`); full-screen sheet below 820px |
 | `messages.css` | User bubble, transcript (no visible scrollbar), message rows, assistant markdown, copy buttons (whole-message split-button `.copy-msg-*`, per-code-block `.code-block` / `.code-copy-btn`), in-reply jump button (`.reply-nav-btn`), error, inline images, `@file` ref links |
 | `tools.css` | Tool-call blocks, todo plan widget, bash `!`-escape block, badge colour variants |
 | `composer.css` | Composer input, attach button, attachment chips, attach popup menu, slash-command menu |

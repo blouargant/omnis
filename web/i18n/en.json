@@ -1061,5 +1061,18 @@
   "pinned.label": "Pinned",
   "pinned.failed": "Could not update the pin",
   "menu.pin": "Pin",
-  "menu.unpin": "Unpin"
+  "menu.unpin": "Unpin",
+  "preview.label": "File preview",
+  "preview.source": "Show the source",
+  "preview.rendered": "Show the rendered view",
+  "preview.edit": "Open in the editor",
+  "preview.copy": "Copy the content",
+  "preview.copied": "Copied",
+  "preview.close": "Close the preview",
+  "preview.loading": "Loading…",
+  "preview.noPreview": "No preview for this type of file.",
+  "preview.missing": "This file cannot be read: {path}",
+  "preview.tooLarge": "This file is too large to preview.",
+  "preview.menu": "Preview",
+  "preview.open": "Show in the preview"
 }

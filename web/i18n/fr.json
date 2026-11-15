@@ -1061,5 +1061,18 @@
   "pinned.label": "Épinglées",
   "pinned.failed": "Impossible de modifier l'épinglage",
   "menu.pin": "Épingler",
-  "menu.unpin": "Désépingler"
+  "menu.unpin": "Désépingler",
+  "preview.label": "Aperçu du fichier",
+  "preview.source": "Afficher la source",
+  "preview.rendered": "Afficher le rendu",
+  "preview.edit": "Ouvrir dans l'éditeur",
+  "preview.copy": "Copier le contenu",
+  "preview.copied": "Copié",
+  "preview.close": "Fermer l'aperçu",
+  "preview.loading": "Chargement…",
+  "preview.noPreview": "Pas d'aperçu pour ce type de fichier.",
+  "preview.missing": "Impossible de lire ce fichier : {path}",
+  "preview.tooLarge": "Ce fichier est trop volumineux pour être prévisualisé.",
+  "preview.menu": "Aperçu",
+  "preview.open": "Afficher dans l'aperçu"
 }

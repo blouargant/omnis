@@ -22,7 +22,7 @@
       } catch (_) { /* ignore */ }
     })();
   </script>
-  <link rel="stylesheet" href="assets/css/styles.css?v=29" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=30" />
   <link rel="stylesheet" href="assets/css/settings.css?v=17" />
   <link rel="stylesheet" href="assets/css/themes/vscode-dark.css" />
   <link rel="stylesheet" href="assets/css/themes/github-dark.css" />
@@ -189,6 +189,35 @@
       </button>
     </div>
     <div class="term-dock-host"></div>
+  </aside>
+  <!-- File preview dock (Claude Desktop style): a file the conversation
+       produced, shown in the chat's right column — docked with #env-panel by
+       placeEnvPanel and replacing it (and the terminal) while shown
+       (app.js "File preview dock"). -->
+  <aside id="file-dock" aria-label="File preview" data-i18n-aria-label="preview.label">
+    <div class="file-dock-resize" aria-hidden="true"></div>
+    <div class="file-dock-head">
+      <span class="file-dock-icon" aria-hidden="true"></span>
+      <span class="file-dock-name"></span>
+      <div class="file-dock-actions">
+        <button class="file-dock-source" type="button" hidden data-tip="Show the source" data-i18n-tip="preview.source" aria-label="Show the source" data-i18n-aria-label="preview.source">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        </button>
+        <button class="file-dock-edit" type="button" data-tip="Open in the editor" data-i18n-tip="preview.edit" aria-label="Open in the editor" data-i18n-aria-label="preview.edit">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+        </button>
+        <button class="file-dock-copy" type="button" data-tip="Copy the content" data-i18n-tip="preview.copy" aria-label="Copy the content" data-i18n-aria-label="preview.copy">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        </button>
+        <button class="file-dock-download" type="button" data-tip="Download" data-i18n-tip="menu.download" aria-label="Download" data-i18n-aria-label="menu.download">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+        <button class="file-dock-close" type="button" data-tip="Close the preview" data-i18n-tip="preview.close" aria-label="Close the preview" data-i18n-aria-label="preview.close">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="file-dock-body"></div>
   </aside>
   <template id="chat-pane-tpl">
     <section class="chat-pane">
@@ -502,13 +531,13 @@
 
   <!-- i18n: the catalogue bundle + runtime load (deferred, in document order)
        BEFORE app.js/settings.js, so tr() and I18N exist when those render. -->
-  <script src="assets/i18n/locales.js?v=102" defer></script>
+  <script src="assets/i18n/locales.js?v=103" defer></script>
   <script src="assets/i18n.js?v=2" defer></script>
   <script src="assets/composer-state.js?v=1" defer></script>
   <script src="assets/memory-ui.js?v=2" defer></script>
   <script src="assets/tool-summary.js?v=2" defer></script>
   <script src="assets/env-panel.js?v=6" defer></script>
-  <script src="assets/app.js?v=145" defer></script>
+  <script src="assets/app.js?v=146" defer></script>
   <script src="assets/settings.js?v=72" defer></script>
 </body>
 </html>

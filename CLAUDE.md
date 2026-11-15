@@ -7708,6 +7708,35 @@ wraps the interactive turn's SSE sink and stores `ConversationTurn.Tools`
 300 calls); `renderHistoryTurn` replays them. Injected turns (mailbox, background,
 scheduled) do not record tools yet.
 
+### Web UI file preview dock
+
+A file the conversation produced opens in the chat's **right column**
+(`#file-dock`, [web/index.html](web/index.html); app.js "File preview dock";
+[web/css/features/file-preview.css](web/css/features/file-preview.css)), like a
+Claude Desktop artifact. Same column as the environment panel and the terminal
+dock (moved by `placeEnvPanel`); `body.file-shown` hides both. **No server
+change**: content comes from `GET /api/file?path=&session=` (the `@file` route,
+owner-checked in cookie mode).
+
+- **State**: one preview per session (`previewCtxs`: sid → `{path, open,
+  source}`), shown by `syncFileDock` (called from `setFocusedPanel`).
+  Opening the terminal calls `hideFilePreviewState`; `previewFile` closes the
+  terminal; the pane's environment button closes the preview and opens the panel.
+- **Rendering** (`previewKind` by extension → `renderFilePreview`): Markdown via
+  `renderMarkdown` (source toggle), images/SVG as `<img>` (blob URL), PDF in an
+  `<iframe>`, HTML in an `<iframe sandbox="">` via `srcdoc` (no scripts, no
+  same-origin), other text as `<pre>` with a line gutter; known binary formats
+  (office, archives, media) and files over 2 MB or containing NUL get a
+  download note. A `previewSeq` drops stale fetches.
+- **Entry points**: produced-file paths in replies (`makePathPreviewable` on the
+  `.dl-path` spans of `linkifyFilePaths` — the download button stays), the
+  Results card rows, `@file` links to files (directories still open a browser
+  tab), the Files browser menu (**Preview**).
+- **Live**: `onAgentFileChanged` → `refreshFilePreviewFor` re-renders the shown
+  file (absolute path match) keeping scroll.
+- **Width**: `--file-dock-w` (560px, resizable, `agent_file_dock_w`) capped at
+  60% of the pane (`--file-dock-col`); `paneMinW` reserves nothing for it.
+
 ### Web UI look (Claude Desktop style)
 
 The web UI follows Claude Desktop's look and feel (spec

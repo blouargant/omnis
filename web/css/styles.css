@@ -24,6 +24,7 @@
 @import "features/panes.css";
 @import "features/editor.css";
 @import "features/terminal.css";
+@import "features/file-preview.css";
 
 /* Conversation surface. */
 @import "features/messages.css";

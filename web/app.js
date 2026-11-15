@@ -357,6 +357,7 @@ function setFocusedPanel(pid) {
   refreshFoldersPanel();
   if (window.EnvPanel) EnvPanel.setSession(activeSessionId);
   syncTermDock();
+  syncFileDock();
   saveLayout();
 }
 
@@ -420,6 +421,9 @@ function layoutWidths() {
 // panel or terminal dock (placeEnvPanel) needs room for it on top of the chat.
 function paneMinW(p) {
   if (!p.root.classList.contains("env-host")) return PANE_MIN_W;
+  // The file preview needs no reservation: its width is capped at a share of
+  // the pane (file-preview.css), so the chat always keeps the rest.
+  if (fileShown()) return PANE_MIN_W;
   const side = termShown() ? termDockNode()
     : document.body.classList.contains("env-open") ? envPanelNode() : null;
   return PANE_MIN_W + (side ? side.offsetWidth : 0);
@@ -446,7 +450,7 @@ function placeEnvPanel() {
   const parent = host ? host.root : document.body;
   // The terminal dock shares the right column (it replaces the panel while
   // shown), so it moves with it.
-  for (const el of [env, termDockNode()]) {
+  for (const el of [env, termDockNode(), fileDockNode()]) {
     if (el && el.parentElement !== parent) parent.appendChild(el);
   }
 }
@@ -1242,7 +1246,8 @@ function attachPaneHandlers(panel) {
     // While the terminal fills the right column, this brings the panel back.
     envBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (termShown()) { hideTermDock(); EnvPanel.setOpen(true); } else EnvPanel.toggle();
+      if (fileShown()) { closeFilePreview(); EnvPanel.setOpen(true); }
+      else if (termShown()) { hideTermDock(); EnvPanel.setOpen(true); } else EnvPanel.toggle();
     });
   }
   if (pe.termBtn) {
@@ -3016,6 +3021,7 @@ async function reloadEditorFromDisk(abs) {
 // when there are no unsaved edits, otherwise flag it stale so the user can
 // reload (or keep their edits) without us silently clobbering their work.
 function onAgentFileChanged(abs) {
+  if (abs) refreshFilePreviewFor(abs);
   if (!abs || !editorModels.has(abs)) return;
   if (editorDirty.get(abs)) {
     editorStale.set(abs, true);
@@ -3319,6 +3325,7 @@ function syncTermDock({ focus = false } = {}) {
 // `opts.cwd` starts it in that folder (Files → Open Terminal here); otherwise it
 // starts in the session's working folder.
 function openDockTerminal(opts) {
+  hideFilePreviewState();
   const ctx = termContext();
   const c = termCtx(ctx);
   const key = "term#" + (++termSeq);
@@ -3339,6 +3346,7 @@ function toggleTermDock() {
   const c = termCtx(termContext());
   if (c.open && c.keys.length) { c.open = false; syncTermDock(); return; }
   if (!c.keys.length) { openDockTerminal(); return; }
+  hideFilePreviewState();
   c.open = true;
   syncTermDock({ focus: true });
 }
@@ -3420,6 +3428,275 @@ function wireTermDock() {
       const w = getComputedStyle(document.documentElement).getPropertyValue("--term-dock-w").trim();
       if (w) localStorage.setItem(TERM_DOCK_W_KEY, w);
       refitVisibleTerminals();
+    };
+    grip.classList.add("is-dragging");
+    document.body.classList.add("resizing");
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  });
+}
+
+// ─── File preview dock ──────────────────────────────────────────────────────
+// A file the conversation produced (a Markdown report, an image, a PDF, a
+// script…) opens in the chat's right column, Claude Desktop style: docked with
+// the environment panel by placeEnvPanel and replacing it — and the terminal —
+// while shown. One file per session (previewCtxs: session id → {path, open,
+// source}); switching sessions shows that session's preview, if any. The
+// content is read through GET /api/file (the same host-file route as @file
+// links), so it follows the file on disk: a `file_changed` event for the shown
+// path re-renders it.
+const FILE_DOCK_W_KEY = "agent_file_dock_w";
+const PREVIEW_TEXT_MAX = 2 * 1024 * 1024; // larger text files: download only
+const PREVIEW_IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif"]);
+const PREVIEW_MD_EXT = new Set(["md", "markdown", "mdown", "mkd"]);
+const PREVIEW_HTML_EXT = new Set(["html", "htm"]);
+// Binary formats there is no in-browser preview for: offered as a download.
+const PREVIEW_BINARY_EXT = new Set(["docx", "doc", "xlsx", "xls", "pptx", "ppt", "odt", "ods", "odp",
+  "zip", "gz", "tgz", "tar", "bz2", "xz", "7z", "rar", "jar", "exe", "bin", "so", "dll", "dylib",
+  "mp3", "mp4", "wav", "ogg", "webm", "mov", "avi", "woff", "woff2", "ttf", "otf", "sqlite", "db", "epub"]);
+const previewCtxs = new Map();
+let previewSeq = 0;
+let previewBlobUrl = null;
+
+let fileDockEl = null;
+function fileDockNode() { return fileDockEl || (fileDockEl = document.getElementById("file-dock")); }
+function fileShown() { return document.body.classList.contains("file-shown"); }
+function previewContext() { return activeSessionId || ""; }
+
+// previewKind decides how a file is shown, from its extension.
+function previewKind(path) {
+  const name = baseName(path).toLowerCase();
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot + 1) : "";
+  if (ext === "pdf") return "pdf";
+  if (PREVIEW_IMAGE_EXT.has(ext)) return "image";
+  if (PREVIEW_MD_EXT.has(ext)) return "markdown";
+  if (PREVIEW_HTML_EXT.has(ext)) return "html";
+  if (PREVIEW_BINARY_EXT.has(ext)) return "binary";
+  return "text";
+}
+
+// previewFile shows `path` (absolute, or relative to the session's folder) in
+// the dock for the focused session. The terminal, if open, gives way.
+function previewFile(path, sessionId) {
+  if (!path) return;
+  if (isMobileLayout()) closeNav();
+  const sid = sessionId !== undefined ? sessionId : previewContext();
+  // Only the focused session's dock is on screen: a preview asked from another
+  // session's content (a background tab) opens for the focused one.
+  const ctx = sid === previewContext() ? sid : previewContext();
+  const c = termCtxs.get(termContext());
+  if (c && c.open) { c.open = false; syncTermDock(); }
+  previewCtxs.set(ctx, { path, open: true, source: false });
+  syncFileDock();
+}
+
+// hideFilePreviewState closes the focused session's preview without
+// re-rendering (the caller shows something else in the column).
+function hideFilePreviewState() {
+  const p = previewCtxs.get(previewContext());
+  if (p && p.open) { p.open = false; syncFileDock(); }
+}
+
+function closeFilePreview() {
+  previewCtxs.delete(previewContext());
+  syncFileDock();
+}
+
+// syncFileDock shows the focused session's preview (or gives the column back).
+function syncFileDock() {
+  const dock = fileDockNode();
+  if (!dock) return;
+  const p = previewCtxs.get(previewContext());
+  const show = !!(p && p.open);
+  const was = fileShown();
+  document.body.classList.toggle("file-shown", show);
+  if (show) {
+    for (const b of document.querySelectorAll(".pane-env-btn")) b.classList.remove("active");
+    if (dock.dataset.path !== p.path || dock.dataset.source !== String(!!p.source) || !was) renderFilePreview(p);
+  } else {
+    dock.dataset.path = "";
+    dock.querySelector(".file-dock-body").replaceChildren();
+    if (previewBlobUrl) { URL.revokeObjectURL(previewBlobUrl); previewBlobUrl = null; }
+    const envOpen = !!(window.EnvPanel && EnvPanel.isOpen());
+    for (const b of document.querySelectorAll(".pane-env-btn")) b.classList.toggle("active", !termShown() && envOpen);
+  }
+  if (show !== was) layoutWidths();
+}
+
+// refreshFilePreviewFor re-renders the preview when the agent changed its file.
+function refreshFilePreviewFor(abs) {
+  const p = previewCtxs.get(previewContext());
+  if (!p || !p.open || !fileShown()) return;
+  if (p.path === abs) renderFilePreview(p, { keepScroll: true });
+}
+
+function previewNote(text, withDownload) {
+  const box = document.createElement("div");
+  box.className = "file-dock-note";
+  const msg = document.createElement("p");
+  msg.textContent = text;
+  box.appendChild(msg);
+  if (withDownload) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "file-dock-note-btn";
+    b.textContent = tr("menu.download");
+    b.addEventListener("click", () => fileDockNode().querySelector(".file-dock-download").click());
+    box.appendChild(b);
+  }
+  return box;
+}
+
+// renderFilePreview fetches the file and renders it by kind.
+async function renderFilePreview(p, { keepScroll = false } = {}) {
+  const dock = fileDockNode();
+  const body = dock.querySelector(".file-dock-body");
+  const mySeq = ++previewSeq;
+  const sid = previewContext();
+  const name = baseName(p.path) || p.path;
+  const kind = previewKind(p.path);
+  dock.dataset.path = p.path;
+  dock.dataset.source = String(!!p.source);
+  dock.dataset.kind = kind;
+  dock.querySelector(".file-dock-icon").innerHTML = fileIconSvg(name);
+  const nameEl = dock.querySelector(".file-dock-name");
+  nameEl.textContent = name;
+  nameEl.setAttribute("data-tip", p.path);
+  const srcBtn = dock.querySelector(".file-dock-source");
+  const canSource = kind === "markdown" || kind === "html" || (kind === "image" && /\.svg$/i.test(name));
+  srcBtn.hidden = !canSource;
+  srcBtn.classList.toggle("active", !!p.source);
+  const label = tr(p.source ? "preview.rendered" : "preview.source");
+  srcBtn.setAttribute("data-tip", label);
+  srcBtn.setAttribute("aria-label", label);
+  const textual = kind === "markdown" || kind === "html" || kind === "text" || (kind === "image" && /\.svg$/i.test(name));
+  dock.querySelector(".file-dock-copy").hidden = !textual;
+  dock.querySelector(".file-dock-edit").hidden = !textual;
+  const scrollTop = keepScroll ? body.scrollTop : 0;
+  if (!keepScroll) body.replaceChildren(Object.assign(document.createElement("div"), { className: "file-dock-loading", textContent: tr("preview.loading") }));
+
+  if (kind === "binary") {
+    body.replaceChildren(previewNote(tr("preview.noPreview"), true));
+    return;
+  }
+  let res;
+  try {
+    res = await apiFetch(`/api/file?path=${encodeURIComponent(p.path)}&session=${encodeURIComponent(sid)}`, { cache: "no-store" });
+  } catch (_) { res = null; }
+  if (mySeq !== previewSeq) return;
+  if (!res || !res.ok) {
+    body.replaceChildren(previewNote(tr("preview.missing", { path: p.path }), false));
+    return;
+  }
+  const blob = await res.blob();
+  if (mySeq !== previewSeq) return;
+  if (previewBlobUrl) { URL.revokeObjectURL(previewBlobUrl); previewBlobUrl = null; }
+
+  const view = document.createElement("div");
+  view.className = "file-dock-view file-dock-" + kind;
+  if ((kind === "image" && !p.source) || kind === "pdf") {
+    const type = kind === "pdf" ? "application/pdf" : (/\.svg$/i.test(name) ? "image/svg+xml" : blob.type);
+    previewBlobUrl = URL.createObjectURL(type ? blob.slice(0, blob.size, type) : blob);
+    if (kind === "pdf") {
+      const frame = document.createElement("iframe");
+      frame.src = previewBlobUrl;
+      frame.title = name;
+      view.appendChild(frame);
+    } else {
+      const img = document.createElement("img");
+      img.src = previewBlobUrl;
+      img.alt = name;
+      view.appendChild(img);
+    }
+  } else {
+    if (blob.size > PREVIEW_TEXT_MAX) {
+      body.replaceChildren(previewNote(tr("preview.tooLarge"), true));
+      return;
+    }
+    const text = await blob.text();
+    if (mySeq !== previewSeq) return;
+    if (text.indexOf("\u0000") !== -1) {
+      body.replaceChildren(previewNote(tr("preview.noPreview"), true));
+      return;
+    }
+    dock._text = text;
+    if (kind === "markdown" && !p.source) {
+      const md = document.createElement("div");
+      md.className = "bubble-assistant file-dock-md";
+      view.appendChild(md);
+      renderMarkdown(md, text);
+    } else if (kind === "html" && !p.source) {
+      // Sandboxed with no permissions: no scripts, no same-origin access.
+      const frame = document.createElement("iframe");
+      frame.setAttribute("sandbox", "");
+      frame.srcdoc = text;
+      frame.title = name;
+      view.appendChild(frame);
+    } else {
+      const pre = document.createElement("pre");
+      pre.className = "file-dock-code";
+      const lines = text.split("\n");
+      if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+      const gutter = document.createElement("span");
+      gutter.className = "file-dock-gutter";
+      gutter.setAttribute("aria-hidden", "true");
+      gutter.textContent = lines.map((_, i) => i + 1).join("\n");
+      const code = document.createElement("code");
+      code.textContent = lines.join("\n");
+      pre.append(gutter, code);
+      view.appendChild(pre);
+    }
+  }
+  body.replaceChildren(view);
+  body.scrollTop = scrollTop;
+}
+
+// wireFileDock binds the dock's header buttons and its resize handle.
+function wireFileDock() {
+  const dock = fileDockNode();
+  if (!dock) return;
+  const saved = localStorage.getItem(FILE_DOCK_W_KEY);
+  if (saved) document.documentElement.style.setProperty("--file-dock-w", saved);
+  const cur = () => previewCtxs.get(previewContext());
+  dock.querySelector(".file-dock-close").addEventListener("click", closeFilePreview);
+  dock.querySelector(".file-dock-source").addEventListener("click", () => {
+    const p = cur();
+    if (!p) return;
+    p.source = !p.source;
+    syncFileDock();
+  });
+  dock.querySelector(".file-dock-download").addEventListener("click", () => {
+    const p = cur();
+    if (p) downloadHostFile(p.path, baseName(p.path), previewContext() || undefined);
+  });
+  dock.querySelector(".file-dock-copy").addEventListener("click", () => {
+    if (typeof dock._text === "string") { writeClipboard(dock._text); showToast(tr("preview.copied"), "ok"); }
+  });
+  dock.querySelector(".file-dock-edit").addEventListener("click", () => {
+    const p = cur();
+    if (p && p.path.startsWith("/")) openFileInEditor(p.path);
+  });
+  const grip = dock.querySelector(".file-dock-resize");
+  grip.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    const pane = dock.parentElement;
+    const right = dock.getBoundingClientRect().right;
+    const move = (ev) => {
+      const max = Math.max(320, pane.getBoundingClientRect().width - PANE_MIN_W);
+      const w = Math.round(Math.min(max, Math.max(320, right - ev.clientX)));
+      document.documentElement.style.setProperty("--file-dock-w", w + "px");
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      grip.classList.remove("is-dragging");
+      document.body.classList.remove("resizing");
+      document.body.style.userSelect = "";
+      const w = getComputedStyle(document.documentElement).getPropertyValue("--file-dock-w").trim();
+      if (w) localStorage.setItem(FILE_DOCK_W_KEY, w);
+      layoutWidths();
     };
     grip.classList.add("is-dragging");
     document.body.classList.add("resizing");
@@ -3901,6 +4178,18 @@ function makeInlineDlBtn(path, sessionId) {
   return btn;
 }
 
+// makePathPreviewable turns a produced-file path into a link that shows the
+// file in the preview column (the download button beside it stays).
+function makePathPreviewable(el, path, sessionId) {
+  el.classList.add("dl-path-preview");
+  el.setAttribute("role", "button");
+  el.tabIndex = 0;
+  el.setAttribute("data-tip", tr("preview.open"));
+  const open = (e) => { e.preventDefault(); previewFile(path, sessionId); };
+  el.addEventListener("click", open);
+  el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") open(e); });
+}
+
 function linkifyFilePaths(rootEl) {
   if (!rootEl) return;
   // Resolve the session that owns this DOM (mirrors rewriteLocalImages) so the
@@ -3970,6 +4259,7 @@ function linkifyFilePaths(rootEl) {
       const sib = code.nextElementSibling;
       if (sib && sib.classList && sib.classList.contains("inline-dl-btn")) return;
       code.classList.add("dl-path");
+      makePathPreviewable(code, path, sessionId);
       code.insertAdjacentElement("afterend", makeInlineDlBtn(path, sessionId));
     });
 
@@ -3986,6 +4276,7 @@ function linkifyFilePaths(rootEl) {
         const span = document.createElement("span");
         span.className = "dl-path";
         span.textContent = text.slice(start, end);
+        makePathPreviewable(span, path, sessionId);
         frag.appendChild(span);
         frag.appendChild(makeInlineDlBtn(path, sessionId));
         last = end;
@@ -4313,7 +4604,12 @@ async function resolveFileRefs(refs, sessionId) {
     if (kind === "file" || kind === "dir") {
       if (kind === "dir") anchor.classList.add("file-ref-dir");
       anchor.setAttribute("data-tip", token);
-      anchor.addEventListener("click", e => { e.preventDefault(); openFileRef(token, sessionId); });
+      // A file opens in the preview column; a directory still opens its
+      // listing in a browser tab.
+      anchor.addEventListener("click", e => {
+        e.preventDefault();
+        if (kind === "file") previewFile(token, sessionId); else openFileRef(token, sessionId);
+      });
     } else {
       anchor.replaceWith(document.createTextNode(anchor.textContent));
     }
@@ -8749,6 +9045,7 @@ function closeTabEverywhere(id) {
 // holding it. Shared by the local delete flow and the remote "session_deleted"
 // push (another browser deleted the session).
 function forgetSession(id) {
+  if (previewCtxs.delete(id) && id === previewContext()) syncFileDock();
   disposeSessionTerminals(id);
   unsubscribeSessionEvents(id);
   dropRevealedRow(id);
@@ -13539,6 +13836,12 @@ function registerEnvCards() {
         row.innerHTML = `<span class="env-row-icon">${fileIconSvg(f.name)}</span>` +
           `<span class="env-row-text">${escHtml(f.name)}</span>`;
         if (f.exists) {
+          // A click shows the file in the preview column.
+          row.classList.add("is-previewable");
+          row.addEventListener("click", (e) => {
+            if (e.target.closest("button")) return;
+            previewFile(f.path, ctx.sessionId);
+          });
           const btn = document.createElement("button");
           btn.type = "button";
           btn.className = "env-icon-btn";
@@ -14756,6 +15059,7 @@ function openFolderCtxMenu(ev, rel, isDir, row) {
     if (activeSessionId) { items.push(SEP); items.push([tr("menu.addToChatEditor"), () => insertFileRef(rel)]); }
   } else {
     items.push([tr("menu.open"), () => openFileInEditor(rel)]);
+    items.push([tr("preview.menu"), () => previewFile(absForRel(rel))]);
     items.push([tr("menu.download"), () => folderDownload(abs, name, false)]);
     items.push(SEP);
     items.push([tr("menu.cut"), () => setFolderClipboard(abs, name, false, "cut")]);
@@ -15063,6 +15367,7 @@ async function restoreLayout(rec, liveIds) {
   wireTreeControls();
   registerEnvCards();
   wireTermDock();
+  wireFileDock();
   EnvPanel.init();
   await loadCollections();
   await loadSessions();

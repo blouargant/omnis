@@ -1061,5 +1061,18 @@
   "pinned.label": "Fijadas",
   "pinned.failed": "No se pudo actualizar el anclaje",
   "menu.pin": "Fijar",
-  "menu.unpin": "Desfijar"
+  "menu.unpin": "Desfijar",
+  "preview.label": "Vista previa del archivo",
+  "preview.source": "Mostrar el código fuente",
+  "preview.rendered": "Mostrar la vista renderizada",
+  "preview.edit": "Abrir en el editor",
+  "preview.copy": "Copiar el contenido",
+  "preview.copied": "Copiado",
+  "preview.close": "Cerrar la vista previa",
+  "preview.loading": "Cargando…",
+  "preview.noPreview": "No hay vista previa para este tipo de archivo.",
+  "preview.missing": "No se puede leer este archivo: {path}",
+  "preview.tooLarge": "Este archivo es demasiado grande para la vista previa.",
+  "preview.menu": "Vista previa",
+  "preview.open": "Mostrar en la vista previa"
 }
