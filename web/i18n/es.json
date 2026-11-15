@@ -1057,5 +1057,9 @@
   "memory.nameTaken": "Ya existe una memoria llamada «{name}».",
   "memory.charCount": "{n} / {max}",
   "memory.empty": "Todavía no hay memorias.",
-  "slash.memory": "Mostrar lo que recuerda esta colección"
+  "slash.memory": "Mostrar lo que recuerda esta colección",
+  "pinned.label": "Fijadas",
+  "pinned.failed": "No se pudo actualizar el anclaje",
+  "menu.pin": "Fijar",
+  "menu.unpin": "Desfijar"
 }

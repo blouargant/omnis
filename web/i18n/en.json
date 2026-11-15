@@ -1057,5 +1057,9 @@
   "memory.nameTaken": "A memory named “{name}” already exists.",
   "memory.charCount": "{n} / {max}",
   "memory.empty": "No memories yet.",
-  "slash.memory": "Show what this collection remembers"
+  "slash.memory": "Show what this collection remembers",
+  "pinned.label": "Pinned",
+  "pinned.failed": "Could not update the pin",
+  "menu.pin": "Pin",
+  "menu.unpin": "Unpin"
 }

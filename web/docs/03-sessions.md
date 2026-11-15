@@ -62,6 +62,19 @@ Collections and each session's filing are persisted (`collections.json` +
 `conversation_<id>.json`) and survive a server restart. Changes sync live across
 open browsers.
 
+### Pinned sessions
+
+Right-click a chat (or open its **⋮** menu) and choose **Pin** to keep it at
+hand: a **Pinned** section appears at the top of the sidebar, above
+**Collections**, and lists every pinned chat. A pinned chat leaves its
+collection's group (and its count) while it is pinned, but stays filed in that
+collection — its context and memory still apply. **Unpin** from the same menu
+puts it back in its group; the section disappears when nothing is pinned. You
+can also drag a chat onto the Pinned section to pin it. Searching shows pinned
+chats under their collection like any other. An archived chat keeps its pin and
+reappears in Pinned once restored. The pin is saved with the conversation and
+syncs live across open browsers.
+
 ### Archived sessions
 
 **Archive** a chat from its **⋯** menu (or several at once with **Select** →

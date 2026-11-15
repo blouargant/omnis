@@ -86,6 +86,10 @@ type SessionMeta struct {
 	// HTTP session-list handler filters them out. Persisted in the conversation
 	// file so the flag survives server restarts.
 	Hidden bool `json:"hidden,omitempty"`
+	// Pinned marks a session the user pinned: the web UI lists it in a
+	// "Pinned" section above the collections (and not in its collection's
+	// group). Persisted in the conversation file.
+	Pinned bool `json:"pinned,omitempty"`
 	// Goal is the session's active /goal completion condition, mirrored from the
 	// conversation file so the server can restore an in-progress goal on restart.
 	// Empty when no goal is active. The live goal state lives in the process-wide
@@ -322,6 +326,27 @@ func (r *Registry) SetHidden(id string, v bool) bool {
 	go func() {
 		if err := SetConversationHidden(id, v); err != nil {
 			log.Printf("sessions: failed to persist hidden flag for session %s: %v", id, err)
+		}
+	}()
+	return true
+}
+
+// SetPinned sets (or clears) the pinned flag on a session (in-memory +
+// persisted asynchronously, mirroring SetArchived). Returns true when a
+// session was found.
+func (r *Registry) SetPinned(id string, v bool) bool {
+	r.mu.Lock()
+	m, ok := r.items[id]
+	if ok {
+		m.Pinned = v
+	}
+	r.mu.Unlock()
+	if !ok {
+		return false
+	}
+	go func() {
+		if err := SetConversationPinned(id, v); err != nil {
+			log.Printf("sessions: failed to persist pinned flag for session %s: %v", id, err)
 		}
 	}()
 	return true

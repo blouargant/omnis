@@ -92,6 +92,7 @@ body.resizing #sidebar { transition: none; }
 #sidebar.collapsed #squad-menu,
 #sidebar.collapsed .sidebar-section-label,
 #sidebar.collapsed #collections-header,
+#sidebar.collapsed #pinned-section,
 #sidebar.collapsed #folders-panel,
 #sidebar.collapsed .account-name,
 #sidebar.collapsed .account-chevron {

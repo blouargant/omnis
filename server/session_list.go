@@ -54,6 +54,10 @@ func handleListSessions(d serverDeps) gin.HandlerFunc {
 		collection := strings.TrimSpace(c.Query("collection"))
 		filterColl := collection != ""
 		wantArchived := strings.EqualFold(c.Query("archived"), "true")
+		// pinned: "true" ⇒ pinned sessions only (the sidebar's Pinned section),
+		// "false" ⇒ pinned sessions excluded (a collection group, which does not
+		// list them), absent ⇒ no filter (search, archived dialog).
+		pinnedFilter := strings.ToLower(strings.TrimSpace(c.Query("pinned")))
 		q := strings.ToLower(strings.TrimSpace(c.Query("q")))
 
 		// Known user collections (lower-cased) so a blank or dangling collection
@@ -71,6 +75,9 @@ func handleListSessions(d serverDeps) gin.HandlerFunc {
 				continue
 			}
 			if m.Archived != wantArchived {
+				continue
+			}
+			if (pinnedFilter == "true" && !m.Pinned) || (pinnedFilter == "false" && m.Pinned) {
 				continue
 			}
 			if filterColl && !strings.EqualFold(effectiveCollection(m, known), collection) {

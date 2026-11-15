@@ -74,6 +74,23 @@
 #sidebar-search-close:hover { background: var(--bg-raised-hover); color: var(--text); }
 .sidebar-action[hidden] { display: none; }
 
+/* ─── Pinned sessions (above the Collections header) ──────────── */
+/* Shown only while something is pinned; rows reuse .collection-sessions. The
+ * list scrolls on its own so a long pin list never pushes the tree away. */
+#pinned-section {
+  flex-shrink: 0;
+  border-radius: 6px;
+}
+#pinned-section[hidden] { display: none; }
+#pinned-section.drag-over { background: var(--accent-bg-soft); }
+#pinned-header { padding: 8px 10px 4px 14px; }
+#pinned-header .sidebar-section-label { margin: 0; }
+#pinned-list {
+  padding: 0 8px 2px 14px;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
 /* ─── Collections header (label · sort · new collection) ──────── */
 #collections-header {
   display: flex;
@@ -270,8 +287,8 @@
 .collection-group:not(.is-open) > .group-more,
 .collection-group:not(.is-open) > .group-empty { display: none; }
 /* A focused session not yet among the loaded rows, shown after them. */
-.collection-sessions li.pinned { margin-top: 4px; }
-.collection-sessions li.pinned::before {
+.collection-sessions li.revealed { margin-top: 4px; }
+.collection-sessions li.revealed::before {
   content: "";
   position: absolute;
   left: 8px;

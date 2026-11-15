@@ -148,6 +148,8 @@ const els = {
   squadToggle:   document.getElementById("squad-toggle"),
   squadMenu:     document.getElementById("squad-menu"),
   tree:          document.getElementById("collection-tree"),
+  pinnedSection: document.getElementById("pinned-section"),
+  pinnedList:    document.getElementById("pinned-list"),
   collectionsNew:  document.getElementById("collections-new"),
   collectionsSort: document.getElementById("collections-sort"),
   sidebarSearchBtn: document.getElementById("sidebar-search-btn"),
@@ -362,11 +364,20 @@ function setFocusedPanel(pid) {
 // and marks the focused pane's session distinctly (`.active-focused`) so the
 // chat the user is actually working in stands out from those open in other
 // panes.
+// sessionRows lists the session rows of the sidebar: the collection tree's and
+// the Pinned section's (`extra` narrows the selector, e.g. `[data-id="x"]`).
+function sessionRows(extra = "") {
+  const out = [];
+  if (els.pinnedList) out.push(...els.pinnedList.querySelectorAll(`li[data-id]${extra}`));
+  if (els.tree) out.push(...els.tree.querySelectorAll(`li[data-id]${extra}`));
+  return out;
+}
+
 function refreshSidebarActive() {
   if (!els.tree) return;
   const shown = new Set(panels.flatMap(p => p.tabs));
   const focusedId = (focusedPanel() || {}).sessionId || null;
-  for (const li of els.tree.querySelectorAll("li[data-id]")) {
+  for (const li of sessionRows()) {
     const id = li.dataset.id;
     li.classList.toggle("active", shown.has(id));
     li.classList.toggle("active-focused", !!focusedId && id === focusedId);
@@ -6442,6 +6453,7 @@ async function loadSessions() {
     const k = c.name.toLowerCase();
     if (loadedBefore.includes(k) && isGroupOpen(c.name) && groupViews.has(k)) reloads.push(reloadGroupPrefix(c.name));
   }
+  reloads.push(loadPinned());
   await Promise.all(reloads);
   if (sessionSearch) await runTreeSearch();
   await reloadArchivedPrefix();
@@ -6456,7 +6468,7 @@ async function loadSessions() {
 // loadSessions() stays the full refresh for rare, broad changes (import, fork,
 // batch actions, archive/unarchive, collection create/rename/delete).
 const REFRESH_COALESCE_MS = 250;
-const pendingRefresh = { groups: new Set(), archived: false, timer: null };
+const pendingRefresh = { groups: new Set(), archived: false, pinned: false, timer: null };
 
 // groupOf names the collection group a session is listed under (General when
 // the session has never been seen here).
@@ -6467,19 +6479,25 @@ function groupOf(sessionId) {
 
 // refreshGroups queues a refresh of the named groups (and of the Archived panel
 // when `archived`).
-function refreshGroups(names, { archived = false } = {}) {
+function refreshGroups(names, { archived = false, pinned = false } = {}) {
   for (const n of names) if (n) pendingRefresh.groups.add(String(n).toLowerCase());
   if (archived) pendingRefresh.archived = true;
+  if (pinned) pendingRefresh.pinned = true;
   if (!pendingRefresh.timer) pendingRefresh.timer = setTimeout(flushRefresh, REFRESH_COALESCE_MS);
 }
 
 async function flushRefresh() {
   const keys = [...pendingRefresh.groups];
   const archived = pendingRefresh.archived;
+  // The Pinned section is one small request: reload it whenever it lists
+  // anything (a pinned session's title, busy state or deletion) or a pin changed.
+  const pinned = pendingRefresh.pinned || pinnedIds.size > 0;
   pendingRefresh.groups.clear();
   pendingRefresh.archived = false;
+  pendingRefresh.pinned = false;
   pendingRefresh.timer = null;
   await loadCollections(); // counts (and any group created meanwhile)
+  if (pinned) await loadPinned();
   if (sessionSearch) {
     await runTreeSearch();
   } else {
@@ -6519,6 +6537,8 @@ const ICON_ARCHIVE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none
 const ICON_UNARCHIVE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><path d="M12 16V9"/><polyline points="9 12 12 9 15 12"/></svg>`;
 const ICON_DELETE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>`;
 const ICON_EXPORT = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 9 12 4 17 9"/><line x1="12" y1="4" x2="12" y2="16"/></svg>`;
+const ICON_PIN = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76V6h6v4.76a2 2 0 0 0 1.11 1.79l1.78.9A2 2 0 0 1 19 15.24V17H5v-1.76a2 2 0 0 1 1.11-1.79l1.78-.9A2 2 0 0 0 9 10.76z"/><path d="M8 2h8"/></svg>`;
+const ICON_UNPIN = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M15 9.34V6h1a2 2 0 0 0 0-4H7.89"/><path d="M2 2l20 20"/><path d="M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h12"/></svg>`;
 // Tick shown inside a session row's select-mode checkbox.
 const ICON_CHECK = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 6"/></svg>`;
 
@@ -6614,6 +6634,12 @@ function openSessionCtxMenu(ev, s, archived, li) {
   // Duplicate = a full fork (the whole conversation), shown nested under this
   // one in the tree. Allowed on archived rows too: forking never touches the source.
   items.push([tr("menu.duplicate"), () => forkConversation(s.id, 0, "", { full: true }), { icon: ICON_DUPLICATE }]);
+  if (!archived) {
+    const pinned = !!(sessionMetaById(s.id) || s).pinned;
+    items.push(pinned
+      ? [tr("menu.unpin"), () => setSessionPinned(s.id, false), { icon: ICON_UNPIN }]
+      : [tr("menu.pin"), () => setSessionPinned(s.id, true), { icon: ICON_PIN }]);
+  }
   // Move-to: one "Move to ▸" item opening a submenu of collections. The
   // session's current collection is shown disabled so the target set is
   // unambiguous. General is always offered.
@@ -6804,9 +6830,9 @@ function forgetGroupKey(name) {
 function newGroupView() {
   // seq is a per-group monotonic token: every reset / prefix-reload bumps it so a
   // slower in-flight page for a superseded view is dropped instead of appending
-  // stale rows. pinnedId is a focused session shown after the loaded rows until
+  // stale rows. revealedId is a focused session shown after the loaded rows until
   // a page contains it (see revealSessionInTree).
-  return { loaded: 0, total: 0, loading: false, exhausted: false, seq: 0, pinnedId: null };
+  return { loaded: 0, total: 0, loading: false, exhausted: false, seq: 0, revealedId: null };
 }
 function groupView(name) {
   const k = String(name).toLowerCase();
@@ -6827,6 +6853,7 @@ function groupQuery(name, offset, limit) {
   const p = new URLSearchParams();
   p.set("collection", name);
   p.set("archived", "false");
+  p.set("pinned", "false"); // pinned sessions are listed in the Pinned section
   p.set("sort", sessionSort);
   p.set("offset", String(offset));
   p.set("limit", String(limit));
@@ -6841,32 +6868,32 @@ function appendGroupRows(name, rows, { reset } = {}) {
   if (!ul) return;
   const v = groupView(name);
   if (reset) ul.innerHTML = "";
-  else ul.querySelector("li.pinned")?.remove();
+  else ul.querySelector("li.revealed")?.remove();
   for (const s of rows) {
     rememberSessionMeta(s);
-    if (s.id === v.pinnedId) v.pinnedId = null;
+    if (s.id === v.revealedId) v.revealedId = null;
     ul.appendChild(buildSessionRow(s, { archived: false }));
   }
-  if (v.pinnedId) {
-    let meta = sessionMetaById(v.pinnedId);
+  if (v.revealedId) {
+    let meta = sessionMetaById(v.revealedId);
     // A pin that was archived or moved elsewhere since no longer belongs here.
-    if (meta && (meta.archived || effectiveCollection(meta).toLowerCase() !== String(name).toLowerCase())) {
-      v.pinnedId = null;
+    if (meta && (meta.archived || meta.pinned || effectiveCollection(meta).toLowerCase() !== String(name).toLowerCase())) {
+      v.revealedId = null;
       meta = null;
     }
-    if (meta && !ul.querySelector(`li[data-id="${CSS.escape(v.pinnedId)}"]`)) {
+    if (meta && !ul.querySelector(`li[data-id="${CSS.escape(v.revealedId)}"]`)) {
       const li = buildSessionRow(meta, { archived: false });
-      li.classList.add("pinned");
+      li.classList.add("revealed");
       ul.appendChild(li);
     } else if (!meta) {
-      v.pinnedId = null;
+      v.revealedId = null;
     }
   }
   nestForkRows(ul);
   // Prune ticks for rows no longer present (deleted elsewhere) so a batch action
   // never targets a gone session.
   if (selectMode) {
-    const present = new Set([...els.tree.querySelectorAll("li[data-id]")].map((li) => li.dataset.id));
+    const present = new Set(sessionRows().map((li) => li.dataset.id));
     for (const id of [...selectedSessions]) if (!present.has(id)) selectedSessions.delete(id);
   }
 }
@@ -6949,11 +6976,11 @@ function nestForkRows(ul) {
 }
 const ICON_CHEVRON_DOWN_SMALL = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>`;
 
-// unpinSession drops a pinned row for `id` from every group (the session was
+// dropRevealedRow drops a pinned row for `id` from every group (the session was
 // deleted, archived or moved), so a refresh can't rebuild it from stale meta.
-function unpinSession(id) {
-  for (const v of groupViews.values()) if (v.pinnedId === id) v.pinnedId = null;
-  for (const li of els.tree.querySelectorAll(`li.pinned[data-id="${CSS.escape(id)}"]`)) li.remove();
+function dropRevealedRow(id) {
+  for (const v of groupViews.values()) if (v.revealedId === id) v.revealedId = null;
+  for (const li of els.tree.querySelectorAll(`li.revealed[data-id="${CSS.escape(id)}"]`)) li.remove();
 }
 
 // updateGroupMore shows "Show more (N)" while the group has unloaded rows.
@@ -6966,7 +6993,7 @@ function updateGroupMore(name) {
   btn.hidden = v.exhausted || left === 0;
   btn.textContent = tr("tree.showMore", { count: left });
   const empty = g.querySelector(".group-empty");
-  if (empty) empty.hidden = !(v.exhausted && v.loaded === 0 && !v.pinnedId);
+  if (empty) empty.hidden = !(v.exhausted && v.loaded === 0 && !v.revealedId);
 }
 
 // loadGroupMore fetches + appends a group's next page (GROUP_PAGE_INITIAL first,
@@ -7026,6 +7053,81 @@ function resetGroup(name) {
   if (ul) ul.innerHTML = "";
   updateGroupMore(name);
   if (isGroupOpen(name)) return loadGroupMore(name);
+}
+
+// ─── Pinned sessions ──────────────────────────────────────────────────────────
+// A pinned session is listed in a "Pinned" section above the Collections header
+// instead of in its collection's group (the server leaves it out of a group's
+// pages and counts). The section is hidden while nothing is pinned, and during a
+// search (which shows every match under its collection).
+const PINNED_LIMIT = 200;
+let pinnedIds = new Set();
+let pinnedSeq = 0;
+
+function updatePinnedSection() {
+  if (!els.pinnedSection) return;
+  els.pinnedSection.hidden = pinnedIds.size === 0 || !!sessionSearch;
+}
+
+async function loadPinned() {
+  if (!els.pinnedList) return;
+  const mySeq = ++pinnedSeq;
+  const p = new URLSearchParams({
+    archived: "false", pinned: "true", sort: sessionSort, offset: "0", limit: String(PINNED_LIMIT),
+  });
+  try {
+    const res = await apiFetch("/api/sessions?" + p.toString(), { cache: "no-store" });
+    if (!res.ok) return;
+    const rows = (await res.json()).sessions || [];
+    if (mySeq !== pinnedSeq) return;
+    const scrollTop = els.pinnedList.scrollTop;
+    els.pinnedList.innerHTML = "";
+    for (const s of rows) {
+      rememberSessionMeta(s);
+      els.pinnedList.appendChild(buildSessionRow(s, { archived: false }));
+    }
+    nestForkRows(els.pinnedList);
+    els.pinnedList.scrollTop = scrollTop;
+    pinnedIds = new Set(rows.map((s) => s.id));
+    updatePinnedSection();
+    syncPanesAfterRender();
+  } catch (e) { console.error("loadPinned:", e); }
+}
+
+// setSessionPinned pins/unpins a session, then refreshes the Pinned section and
+// the session's collection group (which gains or loses its row).
+async function setSessionPinned(id, pinned) {
+  try {
+    const res = await apiFetch(`/api/sessions/${encodeURIComponent(id)}/pin`, {
+      method: "POST",
+      body: JSON.stringify({ pinned: !!pinned }),
+    });
+    if (!res.ok) { showToast(tr("pinned.failed"), "err"); return; }
+    const meta = await res.json().catch(() => null);
+    if (meta && meta.id) rememberSessionMeta(meta);
+    else { const m = sessionMetaById(id); if (m) m.pinned = !!pinned; }
+    dropRevealedRow(id);
+    refreshGroups([groupOf(id)], { pinned: true });
+  } catch (e) { console.error(e); showToast(tr("pinned.failed"), "err"); }
+}
+
+// Dropping a dragged session row on the Pinned section pins it.
+if (els.pinnedSection) {
+  els.pinnedSection.addEventListener("dragover", (ev) => {
+    if (!sessionDrag || pinnedIds.has(sessionDrag)) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = "move";
+    els.pinnedSection.classList.add("drag-over");
+  });
+  els.pinnedSection.addEventListener("dragleave", (ev) => {
+    if (!els.pinnedSection.contains(ev.relatedTarget)) els.pinnedSection.classList.remove("drag-over");
+  });
+  els.pinnedSection.addEventListener("drop", (ev) => {
+    els.pinnedSection.classList.remove("drag-over");
+    if (!sessionDrag) return;
+    ev.preventDefault();
+    setSessionPinned(sessionDrag, true);
+  });
 }
 
 // ─── Archived sessions dialog ─────────────────────────────────────────────────
@@ -7244,7 +7346,7 @@ function openArchivedDialog() {
 }
 
 function setSessionBusy(sessionId, busy) {
-  for (const li of els.tree.querySelectorAll(`li[data-id="${CSS.escape(sessionId)}"]`)) {
+  for (const li of sessionRows(`[data-id="${CSS.escape(sessionId)}"]`)) {
     li.classList.toggle("session-busy", busy);
   }
 }
@@ -7488,12 +7590,18 @@ async function revealSessionInTree(id) {
     if (activeSessionId !== id) return;
   }
   if (!meta || meta.archived) return; // unresolvable or archived — leave the tree alone
+  if (meta.pinned || pinnedIds.has(id)) {
+    // Listed in the Pinned section, never in its collection's group.
+    refreshSidebarActive();
+    els.pinnedList?.querySelector(`li[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "nearest" });
+    return;
+  }
   const name = effectiveCollection(meta);
   const g = groupEl(name);
   if (!g) return;
   const v = groupView(name);
   if (!g.querySelector(`.collection-sessions li[data-id="${CSS.escape(id)}"]`)) {
-    v.pinnedId = id;
+    v.revealedId = id;
     if (v.loaded > 0) appendGroupRows(name, [], { reset: false });
   }
   if (!isGroupOpen(name)) {
@@ -8375,7 +8483,7 @@ async function moveSessionToCollection(sessionId, target) {
       showToast(b.error || tr("collections.moveFailed"), "err");
       return;
     }
-    unpinSession(sessionId);
+    dropRevealedRow(sessionId);
     refreshGroups([from, target]); // counts are refreshed with them
   } catch (e) { console.error(e); }
 }
@@ -8402,6 +8510,7 @@ async function setTreeSearch(query) {
   sessionSearch = q;
   if (q && selectMode) exitSelectMode();
   els.tree.classList.toggle("searching", !!q);
+  updatePinnedSection(); // search shows pinned sessions in their collections
   if (!q) {
     els.treeSearchEmpty.hidden = true;
     const saved = preSearchLoaded || new Map();
@@ -8504,7 +8613,7 @@ function enterSelectMode(scopeName) {
   selectedSessions.clear();
   els.sidebar.classList.add("selecting");
   els.treeSelectBar.hidden = false;
-  for (const li of els.tree.querySelectorAll("li[data-id]")) { li.classList.remove("row-selected"); li.draggable = false; }
+  for (const li of sessionRows()) { li.classList.remove("row-selected"); li.draggable = false; }
   updateSelectBar();
 }
 function exitSelectMode() {
@@ -8514,7 +8623,7 @@ function exitSelectMode() {
   selectedSessions.clear();
   els.sidebar.classList.remove("selecting");
   els.treeSelectBar.hidden = true;
-  for (const li of els.tree.querySelectorAll("li[data-id]")) { li.classList.remove("row-selected"); li.draggable = true; }
+  for (const li of sessionRows()) { li.classList.remove("row-selected"); li.draggable = true; }
 }
 
 // scopeRowIds lists the loaded row ids of the group selection was entered from.
@@ -8548,7 +8657,7 @@ function toggleSelectAll() {
     if (allSel) selectedSessions.delete(id);
     else selectedSessions.add(id);
   }
-  for (const li of els.tree.querySelectorAll("li[data-id]")) {
+  for (const li of sessionRows()) {
     li.classList.toggle("row-selected", selectedSessions.has(li.dataset.id));
   }
   updateSelectBar();
@@ -8574,7 +8683,7 @@ async function runBatch(fn) {
   await Promise.all(ids.map((id) => fn(id).catch((e) => console.error("batch:", id, e))));
   // Every batch action (move / archive / delete) takes the session out of the
   // group it may be pinned in.
-  for (const id of ids) unpinSession(id);
+  for (const id of ids) dropRevealedRow(id);
   exitSelectMode();
   await loadSessions();
 }
@@ -8642,7 +8751,7 @@ function closeTabEverywhere(id) {
 function forgetSession(id) {
   disposeSessionTerminals(id);
   unsubscribeSessionEvents(id);
-  unpinSession(id);
+  dropRevealedRow(id);
   sessionMeta.delete(id);
   sessionTurnCounts.delete(id);
   sessionContainers.delete(id);
@@ -8706,7 +8815,7 @@ async function archiveSession(id) {
     unsubscribeSessionEvents(id);
     const meta = sessionMeta.get(id);
     if (meta) meta.archived = true;
-    unpinSession(id);
+    dropRevealedRow(id);
     disposeSessionTerminals(id);
     // Close its tab in every pane — an archived session is set aside, so it
     // shouldn't stay open. Its DOM stays cached in sessionContainers, so
@@ -9390,6 +9499,12 @@ async function subscribeGlobalEvents() {
           // rebuild the tree and re-fetch the open groups (a rename/delete
           // cascaded onto their sessions' Collection field).
           loadSessions();
+        } else if (event === "session_pinned" && sid) {
+          // Pinned/unpinned here or in another browser: the row changes section.
+          const m = sessionMetaById(sid);
+          if (m) m.pinned = !!(data && data.pinned);
+          dropRevealedRow(sid);
+          refreshGroups([groupOf(sid)], { pinned: true });
         } else if (event === "session_moved" && sid) {
           // A session was filed under a different collection (here or elsewhere)
           // — refresh the group it left and the one it joined (and the counts).

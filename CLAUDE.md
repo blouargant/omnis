@@ -3799,6 +3799,38 @@ exactly one** ("move" semantics, flat — no nesting).
 - **No-op contract**: no `collections.json` ⇒ only General exists and every
   session shows under it.
 
+### Pinned sessions (sidebar "Pinned" section)
+
+A session can be **pinned**: it is then listed in a `#pinned-section` above the
+Collections header ([web/index.html](web/index.html)) instead of in its
+collection's group, while staying filed in that collection (context, memory,
+squad seed unchanged). Hidden while nothing is pinned and during a search.
+
+- **Data**: `Pinned` on `SessionMeta` + `ConversationFile` (`pinned`),
+  `Registry.SetPinned` + `SetConversationPinned`, restored by
+  `LoadPersistedSessions`. Not inherited by forks, dropped on import.
+- **Route**: `POST /api/sessions/:id/pin {pinned}` (`handlePinSession`,
+  [server/collections.go](server/collections.go)) → `session_pinned` event
+  (`{pinned}`) on `/api/events`.
+- **Listing**: the paginated `GET /api/sessions` takes `pinned=true` (Pinned
+  section) / `pinned=false` (a collection group); absent ⇒ no filter (search,
+  archived dialog). `collectionCounts`' `active` excludes pinned sessions so a
+  group header agrees with its paginated `total`. Archived pinned sessions keep
+  the flag and are simply not listed (the section asks `archived=false`).
+- **Client** ([web/app.js](web/app.js) "Pinned sessions"): `loadPinned`
+  (one page of `PINNED_LIMIT`, current sort; rows built by `buildSessionRow` in
+  `ul#pinned-list.collection-sessions`, so they reuse the row styles),
+  `pinnedIds`, `setSessionPinned`, Pin/Unpin in `openSessionCtxMenu`, drop target
+  on the section. `loadSessions` reloads it; `flushRefresh` reloads it when it
+  lists anything or a pin changed (`refreshGroups(…, {pinned:true})`).
+  `sessionRows()` is the helper every "all sidebar rows" query uses (tree +
+  pinned list). `revealSessionInTree` scrolls the Pinned row for a pinned session
+  and never builds a group's revealed row for it.
+- **Naming GOTCHA**: the tree's former internal "pinned row" (a focused session
+  shown after a group's loaded rows) was renamed **revealed** (`revealedId`,
+  `li.revealed`, `dropRevealedRow`) so "pinned" means only this feature.
+- Test: [server/session_pin_test.go](server/session_pin_test.go).
+
 ### Session list pagination (server-side windowing)
 
 The tree's groups and the Archived sessions dialog are **paginated server-side** —

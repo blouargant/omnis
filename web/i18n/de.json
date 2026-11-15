@@ -1057,5 +1057,9 @@
   "memory.nameTaken": "Eine Erinnerung namens „{name}“ existiert bereits.",
   "memory.charCount": "{n} / {max}",
   "memory.empty": "Noch keine Erinnerungen.",
-  "slash.memory": "Zeigen, woran sich diese Sammlung erinnert"
+  "slash.memory": "Zeigen, woran sich diese Sammlung erinnert",
+  "pinned.label": "Angeheftet",
+  "pinned.failed": "Anheften konnte nicht geändert werden",
+  "menu.pin": "Anheften",
+  "menu.unpin": "Lösen"
 }

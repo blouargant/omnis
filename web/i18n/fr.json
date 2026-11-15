@@ -1057,5 +1057,9 @@
   "memory.nameTaken": "Une mémoire nommée « {name} » existe déjà.",
   "memory.charCount": "{n} / {max}",
   "memory.empty": "Aucune mémoire pour l'instant.",
-  "slash.memory": "Afficher ce dont cette collection se souvient"
+  "slash.memory": "Afficher ce dont cette collection se souvient",
+  "pinned.label": "Épinglées",
+  "pinned.failed": "Impossible de modifier l'épinglage",
+  "menu.pin": "Épingler",
+  "menu.unpin": "Désépingler"
 }

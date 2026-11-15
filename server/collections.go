@@ -65,7 +65,9 @@ func collectionCounts(d serverDeps, login string, known []string) (all, active m
 			}
 		}
 		all[target]++
-		if !m.Archived {
+		// A pinned session is listed in the sidebar's Pinned section, not in its
+		// collection's group, so it is not counted in the group header either.
+		if !m.Archived && !m.Pinned {
 			active[target]++
 		}
 	}
@@ -367,6 +369,30 @@ func handleSetCollectionContext(d serverDeps) gin.HandlerFunc {
 			"has_context":  store.HasContext(name),
 			"instructions": store.ReadInstructions(name),
 		})
+	}
+}
+
+// handlePinSession pins or unpins a session ({pinned: bool}). A pinned session
+// is listed in the web UI's Pinned section above the collections.
+func handlePinSession(d serverDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		var body struct {
+			Pinned bool `json:"pinned"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+			return
+		}
+		if !d.Registry.SetPinned(id, body.Pinned) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+			return
+		}
+		if d.PushEvents != nil {
+			d.PushEvents.broadcastData("session_pinned", id, map[string]any{"pinned": body.Pinned})
+		}
+		meta, _ := d.Registry.Get(id)
+		c.JSON(http.StatusOK, meta)
 	}
 }
 
