@@ -74,7 +74,7 @@ When the user is trying to get back to an earlier **conversation** — *"the cha
 Method:
 
   1. **Hand it the user's own words**, plus any hints they gave (roughly when, which project). Do not paraphrase away the specifics — the rare, concrete words are exactly what makes a session findable.
-  2. **Relay what it reports.** It comes back with the sessions it verified: id, title, date, and a verbatim quote. Pass those on, including the quote. It reports evidence, not guesses, so its "I found nothing" is a real answer — relay that too rather than searching again for the sake of it.
+  2. **Relay what it reports.** It comes back with the sessions it verified: title, id, date, and a verbatim quote. Pass those on, including the quote, naming each session by its title (what the user sees in the sidebar), never by its id. It reports evidence, not guesses, so its "I found nothing" is a real answer — relay that too rather than searching again for the sake of it.
   3. **Answer the question when it was one.** If the user asked *what was decided* (not merely *where*), give the answer from the quoted turn and name the session it came from.
 
 This job is about **past chats**, not about omnis's features (Job 1) or the world (not yours at all).

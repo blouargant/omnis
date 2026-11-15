@@ -241,20 +241,45 @@ type reportOut struct {
 	FinalResult string `json:"final_result"`
 }
 
-// reportFinalResult renders a report for a calling agent.
-func reportFinalResult(sessions []ReportedSession) string {
+// sessionNamingNote ends the description of every tool that hands sessions to
+// a model: the session_id is an internal petname (fair-lioness) the user never
+// sees, and an agent summarising sessions listed them by it.
+const sessionNamingNote = "When you name a session to the user, use its `title` (the name shown in " +
+	"the sidebar), never its `session_id`, which is internal."
+
+// reportFinalResult renders a report for a calling agent, each session under
+// its title (looked up with title; nil or "" leaves the id alone).
+func reportFinalResult(sessions []ReportedSession, title func(id string) string) string {
 	var b strings.Builder
 	for _, s := range sessions {
 		id := strings.TrimSpace(s.SessionID)
 		if id == "" {
 			continue
 		}
-		fmt.Fprintf(&b, "- %s: %s\n", id, strings.TrimSpace(s.Reason))
+		t := ""
+		if title != nil {
+			t = strings.TrimSpace(title(id))
+		}
+		if t != "" {
+			fmt.Fprintf(&b, "- %q (session_id %s): %s\n", t, id, strings.TrimSpace(s.Reason))
+		} else {
+			fmt.Fprintf(&b, "- session_id %s: %s\n", id, strings.TrimSpace(s.Reason))
+		}
 	}
 	if b.Len() == 0 {
 		return "No matching session found."
 	}
-	return "Sessions found (session id: why it matches):\n" + b.String()
+	return "Sessions found (name them to the user by their title, not by session_id):\n" + b.String()
+}
+
+// sessionTitle reads a session's title from its conversation file ("" when
+// unknown).
+func sessionTitle(id string) string {
+	c, _, _ := loadConv(id)
+	if c == nil {
+		return ""
+	}
+	return c.Title
 }
 
 // NewTools builds the `sessions` tool group.
@@ -270,7 +295,7 @@ func NewTools(d Deps) []tool.Tool {
 			"when a semantic index is available (`mode: semantic`) and by literal term match otherwise " +
 			"(`mode: scan`). Arguments: `query` (string, required); `k` (int, optional, default 10); " +
 			"`exclude_archived` (bool, optional). Run several differently-worded queries when the first " +
-			"is inconclusive — the user's words are rarely the words used in the session.",
+			"is inconclusive — the user's words are rarely the words used in the session. " + sessionNamingNote,
 	}, func(tc adk.ToolContext, in searchIn) (searchOut, error) {
 		return searchSessions(tc, d, callerSession(tc), in)
 	}); err == nil {
@@ -282,7 +307,7 @@ func NewTools(d Deps) []tool.Tool {
 		Description: "Read the actual exchanges of one past session so you can VERIFY a search hit and quote " +
 			"it verbatim. Returns the user/assistant text of a slice of its turns. Arguments: `session_id` " +
 			"(string, required); `from_turn` (int, optional, default 0); `turns` (int, optional, default 6, " +
-			"max 30).",
+			"max 30). " + sessionNamingNote,
 	}, func(tc adk.ToolContext, in readIn) (readOut, error) {
 		return readSession(callerSession(tc), in)
 	}); err == nil {
@@ -293,7 +318,7 @@ func NewTools(d Deps) []tool.Tool {
 		Name: ListToolName,
 		Description: "List the most recently used past sessions (id, title, collection, turn count, date). " +
 			"Use it to answer questions about recent activity, or to orient yourself before searching. " +
-			"Arguments: `limit` (int, optional, default 20, max 100).",
+			"Arguments: `limit` (int, optional, default 20, max 100). " + sessionNamingNote,
 	}, func(tc adk.ToolContext, in listIn) (listOut, error) {
 		return listSessions(callerSession(tc), in), nil
 	}); err == nil {
@@ -326,7 +351,7 @@ func NewTools(d Deps) []tool.Tool {
 		// routing tools use (see agent/routing.go). Mirror the "call this ONCE, as
 		// your final tool call" instruction in code.
 		adk.EndTurnAfterToolCall(ctx)
-		return reportOut{OK: true, Count: n, FinalResult: reportFinalResult(in.Sessions)}, nil
+		return reportOut{OK: true, Count: n, FinalResult: reportFinalResult(in.Sessions, sessionTitle)}, nil
 	}); err == nil {
 		out = append(out, report)
 	}
