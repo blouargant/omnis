@@ -528,9 +528,11 @@ func TestShippedConfigParity(t *testing.T) {
 		{"memory_save", map[string]any{"name": "a", "description": "d", "type": "user", "content": "c"}, DecisionAllow},
 		{"memory_read", map[string]any{"name": "a"}, DecisionAllow},
 		{"memory_delete", map[string]any{"name": "a"}, DecisionAllow},
-		// …but a sub-agent's mutating tools still prompt (fall through to ask).
-		{"Write", file("/proj/x.go"), DecisionAsk},
-		{"Edit", file("/proj/x.go"), DecisionAsk},
+		// …but mutating tools still prompt outside the working dir (/proj):
+		// acceptEdits only covers the session's working directory.
+		{"Write", file("/elsewhere/x.go"), DecisionAsk},
+		{"Edit", file("/elsewhere/x.go"), DecisionAsk},
+		{"Write", file("/proj/x.go"), DecisionAllow},
 	}
 	for _, c := range cases {
 		if d, r := cfg.CheckArgs(c.tool, c.args, "/proj"); d != c.want {

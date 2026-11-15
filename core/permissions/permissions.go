@@ -383,7 +383,7 @@ func (c *Config) checkArgsVerdict(toolName string, args map[string]any, cwd stri
 		if isEditTool(toolName) && underWorkingDir(ctx.filePath, cwd, ps) {
 			return Verdict{Decision: DecisionAllow, Reason: "acceptEdits mode"}
 		}
-		if toolName == "Bash" && ctx.command != "" && isCommonFsCommand(ctx.command) {
+		if toolName == "Bash" && ctx.command != "" && isCommonFsCommand(ctx.command, cwd, ps) {
 			return Verdict{Decision: DecisionAllow, Reason: "acceptEdits mode"}
 		}
 	}
@@ -563,36 +563,94 @@ var commonFsCommands = map[string]bool{
 	"mkdir": true, "touch": true, "mv": true, "cp": true, "rmdir": true, "ln": true,
 }
 
-func isCommonFsCommand(command string) bool {
+func isCommonFsCommand(command, cwd string, ps *PermSet) bool {
 	subs := bashSubcommands(command)
 	if len(subs) == 0 {
 		return false
 	}
 	for _, sub := range subs {
 		f := strings.Fields(sub)
-		if len(f) == 0 || !commonFsCommands[f[0]] {
+		if len(f) == 0 || !commonFsCommands[f[0]] || hasWriteRedirect(sub) {
 			return false
+		}
+		// Every operand must be a plain path inside the working dir: the mode
+		// covers the working dir only, and a command naming ~/.bashrc, /etc or
+		// $HOME/... must still ask. Quoting, expansion and globs are not
+		// resolved here, so any of them falls back to asking.
+		for _, a := range f[1:] {
+			if strings.HasPrefix(a, "-") {
+				continue
+			}
+			if strings.ContainsAny(a, "$`~*?[{\"'") || !underWorkingDir(a, cwd, ps) {
+				return false
+			}
 		}
 	}
 	return true
 }
 
 // underWorkingDir reports whether an edit's target path is inside the session
-// cwd or one of the configured additional directories.
+// cwd or one of the configured additional directories — the scope acceptEdits
+// auto-allows. Most sessions' working dir is the user's home, so three guards
+// keep it from covering what an agent must not rewrite unseen:
+//   - no component of the path below the working dir may be hidden (".bashrc",
+//     ".git/config", ".omnis/permissions.json" — the last would let an agent
+//     grant itself rights);
+//   - symlinks are resolved on the longest existing prefix, so a link inside the
+//     working dir pointing elsewhere does not count as inside;
+//   - a working dir of "/" covers nothing.
 func underWorkingDir(filePath, cwd string, ps *PermSet) bool {
 	if filePath == "" {
 		return true // no path arg (e.g. some edit tools) — trust the mode
 	}
-	abs := resolveAbsPath(filePath, cwd)
-	if cwdMatches(cwd, abs) {
-		return true
-	}
-	for _, d := range ps.AdditionalDirectories {
-		if cwdMatches(d, abs) {
+	abs := evalExistingPrefix(resolveAbsPath(filePath, cwd))
+	bases := append([]string{cwd}, ps.AdditionalDirectories...)
+	for _, d := range bases {
+		if d == "" {
+			continue
+		}
+		base := evalExistingPrefix(filepath.Clean(d))
+		if base == "/" || !cwdMatches(base, abs) {
+			continue
+		}
+		rel, err := filepath.Rel(base, abs)
+		if err != nil {
+			continue
+		}
+		hidden := false
+		for _, c := range strings.Split(rel, string(filepath.Separator)) {
+			if strings.HasPrefix(c, ".") && c != "." {
+				hidden = true
+				break
+			}
+		}
+		if !hidden {
 			return true
 		}
 	}
 	return false
+}
+
+// evalExistingPrefix resolves symlinks in the longest existing prefix of an
+// absolute path and re-appends the part that does not exist yet (a file being
+// created, or new directories under it).
+func evalExistingPrefix(p string) string {
+	if p == "" {
+		return p
+	}
+	rest := ""
+	cur := p
+	for {
+		if r, err := filepath.EvalSymlinks(cur); err == nil {
+			return filepath.Join(r, rest)
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return p
+		}
+		rest = filepath.Join(filepath.Base(cur), rest)
+		cur = parent
+	}
 }
 
 func stringArg(args map[string]any, key string) string {

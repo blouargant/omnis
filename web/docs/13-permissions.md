@@ -77,11 +77,24 @@ argument.)
 | Mode | Behaviour for unmatched calls |
 |---|---|
 | `default` | prompt (ask) |
-| `acceptEdits` | auto-allow edits in the working dir + common fs commands (`mkdir`, `mv`, …) |
+| `acceptEdits` (shipped default) | auto-allow edits in the session's working folder + common fs commands (`mkdir`, `mv`, `cp`, …) whose paths are all inside it; everything else prompts |
 | `plan` | reads allowed, edits and non-read-only commands denied |
 | `dontAsk` | deny unless explicitly allowed |
 | `bypassPermissions` | allow everything except the hard safety floor |
 | `auto` | treated like `default` (no background classifier) |
+
+`acceptEdits` covers the session's working folder only (the folder shown in
+the Environment card), never:
+
+- a hidden file or folder inside it (`.bashrc`, `.git/…`, `.omnis/…`) —
+  sessions often run in your home folder, where those hold your shell setup and
+  omnis's own configuration;
+- a path that leaves it, including through a symbolic link;
+- anything when the working folder is `/`.
+
+Those writes, and `mv`/`cp`/`ln`… with a path outside the folder, a `$VAR`, a
+`~` or a wildcard, show the usual card. Set `defaultMode` to `default` to be
+asked for every write.
 
 ## Safety floor
 

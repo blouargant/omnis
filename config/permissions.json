@@ -1,6 +1,6 @@
 {
   "permissions": {
-    "defaultMode": "default",
+    "defaultMode": "acceptEdits",
     "deny": [
       {
         "regex": "\\brm\\b(\\s+-{1,2}[A-Za-z]+)+\\s+\"?(/|~|\\$\\{?HOME\\}?)(/\\*?|/\\.\\.?)?\"?(\\s|\"|'|$|;|&|\\|)",

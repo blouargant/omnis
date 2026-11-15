@@ -3352,6 +3352,18 @@ calls fall through to the mode default (ask in `default` mode).
   ask > allow), and `DefaultAsk` stays true only when every ask was a default
   ask. Pinned by `TestMultiEditPathsAreCheckedPerFile`. Reminder: in path
   specs `/x/**` is relative to the project root — an absolute path is `//x/**`.
+- **Shipped default is `acceptEdits`, scoped tighter than Claude Code's**
+  (`underWorkingDir` / `isCommonFsCommand` in
+  [permissions.go](core/permissions/permissions.go)). Most sessions' working dir
+  is the user's HOME (the server's process cwd), so a plain acceptEdits would
+  auto-allow `~/.bashrc` or `~/.omnis/permissions.json` (an agent granting
+  itself rights). It therefore never covers a path with a hidden component
+  below the working dir, a path that leaves it through a symlink (resolved on
+  the longest existing prefix), or anything when the working dir is `/`; the
+  `mkdir`/`touch`/`mv`/`cp`/`rmdir`/`ln` auto-allow requires every operand to be
+  a plain path inside the working dir (no `$`, `~`, quotes, globs, redirect).
+  Pinned by `TestShippedAcceptEditsStaysInTheWorkingDir`; its dirs must not be
+  under `/tmp`, which the shipped `Edit(//tmp/**)` allow covers anyway.
 - **Modes** (`defaultMode`): `default`/`acceptEdits`/`plan`/`dontAsk`/
   `bypassPermissions`/`auto` — applied in `CheckArgs` (bypass & plan are
   authoritative; the rest only change the unmatched-call default). The Bash

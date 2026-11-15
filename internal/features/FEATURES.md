@@ -22,6 +22,7 @@
 - **Collection memory** — Omnis remembers your corrections and preferences per collection and applies them in every later chat there.
 - **Memory ignores instructions hidden in files** — Omnis only remembers what you said or approved: a note planted in a file or a web page the agent reads is no longer saved as your preference.
 - **Memory catches feedback on drafts** — remarks like "too long, titles are always under 6 words" are now saved as rules, and answers follow what Omnis knows about you.
+- **Writes in the working folder no longer ask** — permissions now default to `acceptEdits`: agents create and edit files in the session's working folder without a card; hidden files (`.bashrc`, `.git`, `.omnis`), paths outside the folder and a working folder of `/` still ask.
 - **Summarise past chats into a file** — ask for a summary of named conversations and the System squad finds them, reads them and writes the document; finding a chat from another chat now returns the sessions found instead of nothing.
 - **Soft-skills retired** — soft-skills, the post-session curator and the `/learn` / `/learn-now` commands are removed; collection memory replaces them, and old configurations and conversations keep loading.
 
