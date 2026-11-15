@@ -25,6 +25,7 @@
     "planning",
     "worktree",
     "bg",
-    "spawn"
+    "spawn",
+    "session_history"
   ]
 }

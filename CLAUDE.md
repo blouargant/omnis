@@ -1274,6 +1274,22 @@ its latency — so its instruction's "verify the top candidates" discipline is t
 lever if that ever needs tightening. The heavy delegating leaders stay on `hosted`,
 where the 8.7× would actually bite.
 
+**Calling `session_search` from an agent gets its report back.** Because
+`report_sessions` ends the run, the sub-agent's last event is a function response
+with no text, and the caller (the Helper in a chat) used to receive
+"stopped without writing a result" for every search — it then re-searched with
+other words, 14 times in one observed turn, and concluded nothing exists. The
+report now carries `final_result` (one `- <session id>: <reason>` line each), and
+`subAgentResultText` ([agent/resumable_agent_tool.go](agent/resumable_agent_tool.go))
+hands a turn-ending tool's `final_result` to the caller when the last event has
+no text; a stop without it (a call cap) keeps `emptySubAgentResult`. Only the
+resumable wrapper does this — an agent with `resumable_sessions: false` would
+still lose it. **To USE sessions' content** (summarise named chats into a file),
+the System leader holds the **`session_history`** group: `search_sessions` /
+`read_session` / `list_sessions` without `report_sessions` (which would end the
+leader's turn). The System squad description routes such requests there; the
+Helper's routes finding only.
+
 **`report_sessions` ends the turn host-side** — a successful call sets
 `ctx.Actions().SkipSummarization = true` ([internal/sessindex/tools.go](internal/sessindex/tools.go)),
 making its function-response event `IsFinalResponse()` so the ADK flow loop stops

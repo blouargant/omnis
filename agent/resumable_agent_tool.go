@@ -121,7 +121,7 @@ func (t *resumableAgentTool) Declaration() *genai.FunctionDeclaration {
 		props[k] = v
 	}
 	props["resume_session"] = &genai.Schema{
-		Type: genai.TypeString,
+		Type:        genai.TypeString,
 		Description: "optional: a `session` handle from an earlier call, or \"last\"",
 	}
 	params.Properties = props
@@ -175,22 +175,41 @@ func (t *resumableAgentTool) Run(toolCtx adk.ToolContext, args any) (map[string]
 	if note != "" {
 		out["note"] = note
 	}
-	if lastEvent != nil {
-		var b strings.Builder
-		for _, p := range lastEvent.Content.Parts {
-			if p != nil && p.Text != "" {
-				b.WriteString(p.Text)
-			}
-		}
-		out["result"] = b.String()
-	}
-	// A run that ended on a tool call (a host-side stop) has no text in its last
-	// event. Say so rather than hand the caller an empty string it may read as
-	// "nothing found".
-	if r, _ := out["result"].(string); strings.TrimSpace(r) == "" {
-		out["result"] = emptySubAgentResult
-	}
+	out["result"] = subAgentResultText(lastEvent)
 	return out, nil
+}
+
+// subAgentResultText is what the caller receives from a sub-agent run: the
+// text of its last event. A run that ended on a tool which ends the turn
+// (session_search's report_sessions) has no text there; when that tool's
+// response carries a `final_result` string, it IS the result. Anything else
+// with no text (a host-side stop) becomes emptySubAgentResult, never an empty
+// string the caller may read as "nothing found".
+func subAgentResultText(lastEvent *session.Event) string {
+	if lastEvent == nil || lastEvent.Content == nil {
+		return emptySubAgentResult
+	}
+	var b strings.Builder
+	for _, p := range lastEvent.Content.Parts {
+		if p != nil && p.Text != "" {
+			b.WriteString(p.Text)
+		}
+	}
+	if strings.TrimSpace(b.String()) != "" {
+		return b.String()
+	}
+	for _, p := range lastEvent.Content.Parts {
+		if p == nil || p.FunctionResponse == nil {
+			continue
+		}
+		if r, ok := p.FunctionResponse.Response["final_result"].(string); ok && strings.TrimSpace(r) != "" {
+			b.WriteString(r)
+		}
+	}
+	if strings.TrimSpace(b.String()) != "" {
+		return b.String()
+	}
+	return emptySubAgentResult
 }
 
 // emptySubAgentResult replaces an empty sub-agent result.

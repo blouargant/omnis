@@ -235,6 +235,26 @@ type reportIn struct {
 type reportOut struct {
 	OK    bool `json:"ok"`
 	Count int  `json:"count"`
+	// FinalResult is the report as text. The call ends the run, so when
+	// session_search runs as a sub-agent (the Helper's, in a chat) this is the
+	// only thing its caller receives (see subAgentResultText in agent/).
+	FinalResult string `json:"final_result"`
+}
+
+// reportFinalResult renders a report for a calling agent.
+func reportFinalResult(sessions []ReportedSession) string {
+	var b strings.Builder
+	for _, s := range sessions {
+		id := strings.TrimSpace(s.SessionID)
+		if id == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "- %s: %s\n", id, strings.TrimSpace(s.Reason))
+	}
+	if b.Len() == 0 {
+		return "No matching session found."
+	}
+	return "Sessions found (session id: why it matches):\n" + b.String()
 }
 
 // NewTools builds the `sessions` tool group.
@@ -306,7 +326,7 @@ func NewTools(d Deps) []tool.Tool {
 		// routing tools use (see agent/routing.go). Mirror the "call this ONCE, as
 		// your final tool call" instruction in code.
 		adk.EndTurnAfterToolCall(ctx)
-		return reportOut{OK: true, Count: n}, nil
+		return reportOut{OK: true, Count: n, FinalResult: reportFinalResult(in.Sessions)}, nil
 	}); err == nil {
 		out = append(out, report)
 	}

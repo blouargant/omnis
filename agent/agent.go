@@ -333,6 +333,16 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			// thunk so it is opened on the first call rather than at every squad
 			// build — it is used in bursts and unloads itself in between.
 			agentTools = append(agentTools, sessindex.NewTools(sessindex.Deps{Index: sessIdx})...)
+		case "session_history":
+			// Read access to past chat sessions for an agent that USES them (the
+			// System leader summarising sessions into a file): the sessions group
+			// minus report_sessions, which ends the caller's turn and only makes
+			// sense as session_search's final report.
+			for _, st := range sessindex.NewTools(sessindex.Deps{Index: sessIdx}) {
+				if st.Name() != "report_sessions" {
+					agentTools = append(agentTools, st)
+				}
+			}
 		case "settings":
 			// Read/write omnis settings on the user's behalf (theme, agents,
 			// models, permissions, hooks, …). Sensitive changes are gated by the
