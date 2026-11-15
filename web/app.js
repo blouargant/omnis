@@ -4209,7 +4209,7 @@ function makePathPreviewable(el, path, sessionId) {
   el.classList.add("dl-path-preview");
   el.setAttribute("role", "button");
   el.tabIndex = 0;
-  el.setAttribute("data-tip", tr("preview.open"));
+  el.setAttribute("data-tip", `${tr("preview.open")} — ${path}`);
   const open = (e) => { e.preventDefault(); previewFile(path, sessionId); };
   el.addEventListener("click", open);
   el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") open(e); });
@@ -4294,6 +4294,11 @@ function linkifyFilePaths(rootEl) {
   }).then(r => r.json()).then(data => {
     const kinds = (data && data.kinds) || {};
     const isFile = p => kinds[p] === "file";
+    // A file under the session's working folder is shown by its relative path
+    // (the full path stays in the tooltip); the message's copy keeps the text
+    // the agent wrote.
+    const cwd = String((data && data.cwd) || "").replace(/\/+$/, "");
+    const shown = (p) => (cwd && p.startsWith(cwd + "/") ? p.slice(cwd.length + 1) : p);
 
     // Apply: inline-code spans.
     codeTargets.forEach(({ code, path }) => {
@@ -4301,6 +4306,7 @@ function linkifyFilePaths(rootEl) {
       const sib = code.nextElementSibling;
       if (sib && sib.classList && sib.classList.contains("inline-dl-btn")) return;
       code.classList.add("dl-path");
+      code.textContent = shown(path);
       makePathPreviewable(code, path, sessionId);
       code.insertAdjacentElement("afterend", makeInlineDlBtn(path, sessionId));
     });
@@ -4317,7 +4323,7 @@ function linkifyFilePaths(rootEl) {
         frag.appendChild(document.createTextNode(text.slice(last, start)));
         const span = document.createElement("span");
         span.className = "dl-path";
-        span.textContent = text.slice(start, end);
+        span.textContent = shown(text.slice(start, end));
         makePathPreviewable(span, path, sessionId);
         frag.appendChild(span);
         frag.appendChild(makeInlineDlBtn(path, sessionId));

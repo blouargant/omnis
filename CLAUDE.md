@@ -7737,7 +7737,11 @@ owner-checked in cookie mode).
   `REL_FILE_PATH_RE` + `matchProduced` over `sessionProduced`, cached per session
   and dropped on `produced_changed`; agents usually name what they wrote
   relative to the working folder, and limiting relative names to produced files
-  keeps a coding chat's `src/main.go` mentions plain), the
+  keeps a coding chat's `src/main.go` mentions plain). A path under the
+  session's working folder is **displayed relative** to it (`report.md`, full
+  path in the tooltip): `POST /api/fileref/resolve` now also returns `cwd` —
+  only for a session the caller owns in cookie mode — and the message's raw
+  text, which Copy uses, is unchanged. The other entry points: the
   Results card rows, `@file` links to files (directories still open a browser
   tab), the Files browser menu (**Preview**).
 - **Live**: `onAgentFileChanged` → `refreshFilePreviewFor` re-renders the shown

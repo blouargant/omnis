@@ -150,7 +150,8 @@ to the chat, like an artifact in Claude Desktop. Open it by clicking:
 
 - a file path the agent gives in its reply (underlined with dots; the small
   download button beside it still downloads) — a full path, or a short name
-  such as `report.md` when it is a file the chat created,
+  such as `report.md` when it is a file the chat created; a file inside the
+  chat's working folder is shown by its path relative to that folder,
 - a file in the panel's **Results** card,
 - an `@file` reference in a message,
 - **Preview** in a file's right-click menu in the Files browser.

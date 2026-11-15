@@ -46,7 +46,14 @@ func handleFileRefResolve(d serverDeps) gin.HandlerFunc {
 		for _, p := range req.Paths {
 			kinds[p] = string(fileref.Classify(p, cwd).Kind)
 		}
-		c.JSON(http.StatusOK, gin.H{"kinds": kinds})
+		// cwd lets the web UI show a produced file under the working folder by
+		// its relative path rather than the absolute one the agent wrote.
+		// In cookie mode only the caller's own session's folder is reported.
+		out := gin.H{"kinds": kinds}
+		if req.Session != "" && visibleTo(requestLogin(c), ownerOfSession(d, req.Session)) {
+			out["cwd"] = cwd
+		}
+		c.JSON(http.StatusOK, out)
 	}
 }
 
