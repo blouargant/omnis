@@ -507,6 +507,17 @@ func TestShippedConfigParity(t *testing.T) {
 		// research_critic's own tool list rather than a squad leader's, which is
 		// exactly why it was missed when the read-only sub-agents were allowlisted.
 		{"web_fetcher", map[string]any{"request": "does vLLM support GPTQ 4-bit?"}, DecisionAllow},
+		// session_search is the Helper's nested gatherer for past chats: it only
+		// searches and reads conversation files, same as the allowlisted tools it
+		// holds, so asking the Helper to find a session must not prompt.
+		{"session_search", map[string]any{"request": "Fork LLM open source"}, DecisionAllow},
+		// The other read-only sub-agents (Landlock-sandboxed, see read_only) and
+		// reading a background task's output: no reason to prompt. The validator's
+		// own record_validation stays gated.
+		{"k8s_auditor", map[string]any{"request": "audit ns demo"}, DecisionAllow},
+		{"k8s_validator", map[string]any{"request": "review this change"}, DecisionAllow},
+		{"bg_output", map[string]any{"id": "t1"}, DecisionAllow},
+		{"record_validation", map[string]any{"subject": "x", "verdict": "APPROVED"}, DecisionAsk},
 		// Reading a skill's detail file is as read-only as load_skill: it serves
 		// only files inside the skill directory. Missing it made every IA Parc
 		// question stop on a permission card before the agent could read
