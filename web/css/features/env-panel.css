@@ -281,3 +281,6 @@ body.term-shown .chat-pane.env-host > :not(.pane-tabbar):not(#env-panel):not(#te
   color: var(--text-faint);
   font-size: 11.5px;
 }
+
+/* A stale memory (project/reference not said or changed for 90 days). */
+.env-memory.is-stale .env-row-text { color: var(--warn-fg); }

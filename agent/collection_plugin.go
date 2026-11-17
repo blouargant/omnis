@@ -224,7 +224,8 @@ func injectCollectionCtx(ctx adk.CallbackContext, req *model.LLMRequest, forRout
 // latest, so the request stays a stable prefix for the prompt cache.
 const memoryTurnReminder = "[Memory — before you answer: if this message corrects or criticises your work " +
 	"(feedback on a draft counts: \"too long\", \"always…\", \"never…\"), states a preference, " +
-	"says who the user is, or gives a fact later conversations will need, call memory_save first, one memory per rule. " +
+	"says who the user is, or gives a fact later conversations will need, call memory_save first, one memory per rule; " +
+	"if it only restates a memory you already have, save that memory again with confirms=true. " +
 	"Never save the details of the task at hand (one event's date, place or time, one draft's content). " +
 	"Then follow the collection memory in your answer and pitch it to the user's profile.]"
 

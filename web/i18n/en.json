@@ -1074,5 +1074,13 @@
   "preview.missing": "This file cannot be read: {path}",
   "preview.tooLarge": "This file is too large to preview.",
   "preview.menu": "Preview",
-  "preview.open": "Show in the preview"
+  "preview.open": "Show in the preview",
+  "memory.savedOn": "Saved {date}",
+  "memory.updatedOn": "updated {date}",
+  "memory.restated.one": "restated once (last {date})",
+  "memory.restated.other": "restated {count} times (last {date})",
+  "memory.stale": "old",
+  "memory.staleTip": "A project fact or reference nobody said or changed for over {days} days: check it is still true.",
+  "memory.sortType": "By type",
+  "memory.sortAge": "Oldest first"
 }

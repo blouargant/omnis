@@ -402,6 +402,26 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.cc-mem-row-date {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+/* A project fact or reference not said or changed for 90 days: review it. */
+.cc-mem-row.is-stale .cc-mem-row-date { color: var(--warn-fg); }
+.cc-mem-sort { display: flex; gap: 4px; margin: 0 0 6px; }
+.cc-mem-sort-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  padding: 1px 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cc-mem-sort-btn.is-active { color: var(--text); background: var(--accent-bg-soft); border-color: transparent; }
 .cc-mem-editor {
   display: flex;
   flex-direction: column;
@@ -1358,6 +1378,14 @@
   padding: 0 6px;
 }
 .memory-modal-desc { color: var(--text-muted); }
+.memory-modal-dates { font-size: 12px; color: var(--text-muted); margin: -4px 0 8px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.memory-stale {
+  font-size: 11px;
+  color: var(--warn-fg);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
+}
 .memory-modal-body { max-height: 50vh; overflow: auto; }
 .memory-modal-gone { color: var(--text-muted); }
 .memory-modal .user-cmd-field select,

@@ -1,7 +1,8 @@
 // Package collmem stores a collection's memory as one Markdown file per fact:
 // <root>/collections/<collection>/memory/<name>.md, and for General (the ""
 // collection) <root>/general-memory/<name>.md. Each file carries a small front
-// matter (name, description, type, updated) followed by the body.
+// matter (name, description, type, created, updated, and when the user restated
+// it: confirmations, last_confirmed) followed by the body.
 //
 // It imports only the standard library so the agent package can use it without
 // an import cycle.
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -46,9 +48,39 @@ type Memory struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Type        string `json:"type"`
+	Created     string `json:"created"` // YYYY-MM-DD, first save; kept on update
 	Updated     string `json:"updated"` // YYYY-MM-DD, set by Save
-	Body        string `json:"body"`
+	// Confirmations counts the times the user restated this memory after it was
+	// first saved; LastConfirmed is the latest of them (YYYY-MM-DD).
+	Confirmations int    `json:"confirmations,omitempty"`
+	LastConfirmed string `json:"last_confirmed,omitempty"`
+	Body          string `json:"body"`
 }
+
+// LastActivity is the latest of Updated and LastConfirmed: when the user last
+// said or changed this.
+func (m Memory) LastActivity() string {
+	if m.LastConfirmed > m.Updated {
+		return m.LastConfirmed
+	}
+	return m.Updated
+}
+
+// SaveMode says what a save means for an existing memory's dates and
+// confirmations (a new memory is always created with no confirmation).
+type SaveMode int
+
+const (
+	// SaveEdit keeps the confirmations: an edit by the user in the UI, a
+	// migration.
+	SaveEdit SaveMode = iota
+	// SaveChange resets them: the agent saved new content (a correction, a new
+	// fact), which the earlier confirmations did not confirm.
+	SaveChange
+	// SaveConfirm counts one more confirmation: the user restated what the
+	// memory already says.
+	SaveConfirm
+)
 
 // Store reads and writes memory files under one root directory.
 type Store struct{ root string }
@@ -124,8 +156,18 @@ func dirLock(dir string) *sync.Mutex {
 	return l
 }
 
-// Save creates or updates a memory. created reports whether the file is new.
+// Save creates or updates a memory with SaveEdit. created reports whether the
+// file is new.
 func (s *Store) Save(collection string, m Memory) (saved Memory, created bool, err error) {
+	return s.SaveWith(collection, m, SaveEdit)
+}
+
+// now is the clock used for the dates (a variable for tests).
+var now = time.Now
+
+// SaveWith creates or updates a memory; mode says how an existing memory's
+// confirmations change. The creation date is always kept.
+func (s *Store) SaveWith(collection string, m Memory, mode SaveMode) (saved Memory, created bool, err error) {
 	dir := s.Dir(collection)
 	if dir == "" {
 		return Memory{}, false, ErrCollection
@@ -146,11 +188,13 @@ func (s *Store) Save(collection string, m Memory) (saved Memory, created bool, e
 		first, _, _ := strings.Cut(strings.TrimSpace(body), "\n")
 		desc = truncateRunes(strings.TrimSpace(first), 80)
 	}
+	today := now().Format("2006-01-02")
 	saved = Memory{
 		Name:        name,
 		Description: desc,
 		Type:        m.Type,
-		Updated:     time.Now().Format("2006-01-02"),
+		Created:     today,
+		Updated:     today,
 		Body:        body,
 	}
 
@@ -161,6 +205,15 @@ func (s *Store) Save(collection string, m Memory) (saved Memory, created bool, e
 	path := filepath.Join(dir, name+".md")
 	if _, statErr := os.Stat(path); statErr == nil {
 		created = false
+		if old, ok := readMemory(path, name); ok {
+			saved.Created = old.Created
+			switch mode {
+			case SaveEdit:
+				saved.Confirmations, saved.LastConfirmed = old.Confirmations, old.LastConfirmed
+			case SaveConfirm:
+				saved.Confirmations, saved.LastConfirmed = old.Confirmations+1, today
+			}
+		}
 	} else if os.IsNotExist(statErr) {
 		created = true
 		if len(s.List(collection)) >= MaxMemories {
@@ -284,9 +337,20 @@ func parse(text string) (Memory, bool) {
 			m.Description = v
 		case "type":
 			m.Type = v
+		case "created":
+			m.Created = v
 		case "updated":
 			m.Updated = v
+		case "confirmations":
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				m.Confirmations = n
+			}
+		case "last_confirmed":
+			m.LastConfirmed = v
 		}
+	}
+	if m.Created == "" {
+		m.Created = m.Updated // files written before the creation date existed
 	}
 	body := strings.Join(lines[end+1:], "\n")
 	m.Body = strings.TrimRight(strings.TrimLeft(body, "\n"), "\n")
@@ -294,8 +358,14 @@ func parse(text string) (Memory, bool) {
 }
 
 func render(m Memory) string {
-	return fmt.Sprintf("---\nname: %s\ndescription: %s\ntype: %s\nupdated: %s\n---\n\n%s\n",
-		m.Name, m.Description, m.Type, m.Updated, m.Body)
+	var b strings.Builder
+	fmt.Fprintf(&b, "---\nname: %s\ndescription: %s\ntype: %s\ncreated: %s\nupdated: %s\n",
+		m.Name, m.Description, m.Type, m.Created, m.Updated)
+	if m.Confirmations > 0 {
+		fmt.Fprintf(&b, "confirmations: %d\nlast_confirmed: %s\n", m.Confirmations, m.LastConfirmed)
+	}
+	fmt.Fprintf(&b, "---\n\n%s\n", m.Body)
+	return b.String()
 }
 
 // oneLine collapses newlines to spaces and trims.

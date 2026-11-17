@@ -4041,7 +4041,9 @@ It replaced soft-skills (see "Soft-skills removed" at the end of this section).
   collection directory. `<root>` is `$OMNIS_HOME` (`paths.ConfigWriteDir()`), or
   the owner's `$OMNIS_HOME/users/<login>/` in cookie mode (`collectionRoot` /
   `userRoot`). Each file is front matter `name` / `description` / `type` /
-  `updated` (YYYY-MM-DD, stamped by `Save`) + a Markdown body. Rules enforced by
+  `created` / `updated` (YYYY-MM-DD; `created` is kept on update, a file without
+  it reads its `updated`) / `confirmations` + `last_confirmed` (only when > 0)
+  + a Markdown body — see "Dates and confirmations" below. Rules enforced by
   `Save`: name `^[a-z0-9][a-z0-9-]{0,63}$` (`NormalizeName` lower-cases, maps
   space/`_` to `-`, strips `.md` — the ONLY way a model- or route-supplied string
   becomes a path segment), type `feedback` / `user` / `project` / `reference`,
@@ -4195,6 +4197,35 @@ It replaced soft-skills (see "Soft-skills removed" at the end of this section).
   at once) and a memory note in `buildCapabilityCheckPrompt`, plus the empty-cut
   retry in `llm.RetryCutToolCall`; balanced memory_bench 11/15 → 27/30, no cut
   in 30 runs (`omnis-benches/reports/memory-routerloop-2026-11-10.md`).
+- **Dates and confirmations** (2026-11-17). `collmem.SaveWith(collection, m,
+  mode)`: a new memory is created with `created` = `updated` = today and no
+  confirmation; on an existing one `created` is kept and the mode decides the
+  count — `SaveEdit` (UI PUT route, migration; `Save` = `SaveWith(…, SaveEdit)`)
+  keeps it, `SaveChange` (agent save, new content) resets it to 0, `SaveConfirm`
+  (agent save with `memory_save` `confirms=true`: the user restated what the
+  memory says) adds one and sets `last_confirmed`. The injected block shows
+  `(saved D[, updated D][, restated N× (last D)])` after each memory's header and
+  index line (`dateNote`, absolute dates so the block only changes on a write),
+  and the answering block ends with `Today is <date>.` — the agent has no other
+  source for today's date; this line makes the block, and the prompt cache,
+  change once a day (the render cache keys the day into its signature, one entry
+  per block). `collmem.Rules` and the per-message reminder say: restated ⇒
+  `confirms=true`; when memories (or a memory and the user now) disagree, the
+  most recent wins and the older one is corrected; rules and user facts do not
+  expire, a months-old project fact or reference is given with its date and
+  flagged as possibly outdated. Demotion over budget: type priority, then the
+  least restated, then the least recent `LastActivity` (= max(updated,
+  last_confirmed)). **Deliberately not done:** no decay weight on age and no
+  count of reads/injections — every memory is injected every turn, so an access
+  count measures nothing and would self-reinforce; only the user's restatements
+  count, and a count never overrides a more recent contradiction (research
+  notes: LongMemEval time-aware indexing, Zep/Graphiti invalidation by date, Mem0
+  salience floor). Web UI ([web/memory-ui.js](web/memory-ui.js)
+  `memoryLastActivity`/`memoryIsStale`/`memoriesByAge`, pinned by
+  `web/tests/memory_age.test.mjs`): dates in the memory view and on list rows,
+  a **By type / Oldest first** toggle, and project/reference memories untouched
+  for 90 days marked **old** (also in the env panel's Memory card). Pinned by
+  [internal/collmem/dates_test.go](internal/collmem/dates_test.go).
 - **Routes** ([server/collection_memories.go](server/collection_memories.go),
   owner-scoped via `userRoot(requestLogin(c))`): `GET /api/collections/:name/memories`
   → `{memories}`, `PUT …/memories/:mem` `{description, type, body}` →

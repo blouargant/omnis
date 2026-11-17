@@ -1074,5 +1074,13 @@
   "preview.missing": "No se puede leer este archivo: {path}",
   "preview.tooLarge": "Este archivo es demasiado grande para la vista previa.",
   "preview.menu": "Vista previa",
-  "preview.open": "Mostrar en la vista previa"
+  "preview.open": "Mostrar en la vista previa",
+  "memory.savedOn": "Guardada el {date}",
+  "memory.updatedOn": "modificada el {date}",
+  "memory.restated.one": "repetida una vez (última el {date})",
+  "memory.restated.other": "repetida {count} veces (última el {date})",
+  "memory.stale": "antigua",
+  "memory.staleTip": "Un hecho del proyecto o una referencia que nadie ha repetido ni modificado desde hace más de {days} días: compruebe que sigue siendo cierto.",
+  "memory.sortType": "Por tipo",
+  "memory.sortAge": "Más antiguas primero"
 }

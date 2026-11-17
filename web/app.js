@@ -2131,6 +2131,21 @@ function memoryTypeLabel(type) {
   return ["feedback", "user", "project", "reference"].includes(type) ? tr("memory.type." + type) : (type || "");
 }
 
+// memoryDate formats a stored YYYY-MM-DD date in the UI locale.
+function memoryDate(d) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d || "")) return d || "";
+  const [y, m, day] = d.split("-").map(Number);
+  return new Date(y, m - 1, day).toLocaleDateString(I18N.locale, { year: "numeric", month: "short", day: "numeric" });
+}
+
+// memoryDatesText: "Saved …[ · updated …][ · restated N× (last …)]".
+function memoryDatesText(m) {
+  const parts = [tr("memory.savedOn", { date: memoryDate(m.created || m.updated) })];
+  if (m.updated && m.updated !== (m.created || m.updated)) parts.push(tr("memory.updatedOn", { date: memoryDate(m.updated) }));
+  if (m.confirmations > 0) parts.push(trN("memory.restated", m.confirmations, { date: memoryDate(m.last_confirmed) }));
+  return parts.join(" · ");
+}
+
 // openMemoryView opens a small dialog showing one memory (type, description,
 // body) with Edit / Delete. It follows memory_changed while open; a memory that
 // no longer exists shows a note instead.
@@ -2176,9 +2191,19 @@ function openMemoryView(collection, name) {
     }
     ok.hidden = false; del.hidden = false;
     body.innerHTML = `<div class="memory-modal-meta"><span class="memory-modal-type"></span><span class="memory-modal-desc"></span></div>` +
+      `<div class="memory-modal-dates"></div>` +
       `<div class="memory-modal-body bubble-assistant rendered"></div>`;
     body.querySelector(".memory-modal-type").textContent = memoryTypeLabel(current.type);
     body.querySelector(".memory-modal-desc").textContent = current.description || "";
+    const dates = body.querySelector(".memory-modal-dates");
+    dates.textContent = memoryDatesText(current);
+    if (memoryIsStale(current)) {
+      const st = document.createElement("span");
+      st.className = "memory-stale";
+      st.textContent = tr("memory.stale");
+      st.setAttribute("data-tip", tr("memory.staleTip", { days: 90 }));
+      dates.appendChild(st);
+    }
     renderMarkdown(body.querySelector(".memory-modal-body"), current.body || "");
   };
   const showEdit = () => {
@@ -8258,6 +8283,7 @@ function buildMemoryList(container, collection) {
   let dirty = false;     // the open editor holds unsaved changes
   let pending = false;   // a refresh arrived while the editor was dirty
   let destroyed = false;
+  let byAge = false;     // list the oldest first (cleanup) instead of by type
 
   const charCount = (s) => [...(s || "")].length;
 
@@ -8391,13 +8417,27 @@ function buildMemoryList(container, collection) {
       container.appendChild(empty);
       return;
     }
-    for (const type of MEMORY_TYPES) {
-      const group = list.filter(m => m.type === type);
+    const sortBar = document.createElement("div");
+    sortBar.className = "cc-mem-sort";
+    for (const [age, key] of [[false, "memory.sortType"], [true, "memory.sortAge"]]) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "cc-mem-sort-btn" + (byAge === age ? " is-active" : "");
+      b.textContent = tr(key);
+      b.addEventListener("click", () => { if (byAge !== age) { byAge = age; render(); } });
+      sortBar.appendChild(b);
+    }
+    container.appendChild(sortBar);
+    const groups = byAge ? [[null, memoriesByAge(list)]]
+      : MEMORY_TYPES.map(type => [type, list.filter(m => m.type === type)]);
+    for (const [type, group] of groups) {
       if (!group.length) continue;
-      const head = document.createElement("div");
-      head.className = "cc-mem-group";
-      head.textContent = memoryTypeLabel(type);
-      container.appendChild(head);
+      if (type) {
+        const head = document.createElement("div");
+        head.className = "cc-mem-group";
+        head.textContent = memoryTypeLabel(type);
+        container.appendChild(head);
+      }
       for (const m of group) {
         const row = document.createElement("div");
         row.className = "cc-mem-row";
@@ -8407,9 +8447,14 @@ function buildMemoryList(container, collection) {
         btn.type = "button";
         btn.className = "cc-mem-row-head";
         btn.setAttribute("aria-expanded", open ? "true" : "false");
-        btn.innerHTML = `<span class="cc-mem-row-name"></span><span class="cc-mem-row-desc"></span>`;
-        btn.querySelector(".cc-mem-row-name").textContent = m.name;
+        btn.innerHTML = `<span class="cc-mem-row-name"></span><span class="cc-mem-row-desc"></span>` +
+          `<span class="cc-mem-row-date"></span>`;
+        btn.querySelector(".cc-mem-row-name").textContent = (byAge ? memoryTypeLabel(m.type) + " · " : "") + m.name;
         btn.querySelector(".cc-mem-row-desc").textContent = m.description || "";
+        const dateEl = btn.querySelector(".cc-mem-row-date");
+        dateEl.textContent = memoryDate(memoryLastActivity(m)) + (m.confirmations > 0 ? ` · ↻${m.confirmations}` : "");
+        dateEl.setAttribute("data-tip", memoryDatesText(m));
+        if (memoryIsStale(m)) row.classList.add("is-stale");
         btn.addEventListener("click", async () => {
           if (!(await confirmDiscard())) return;
           if (open) { closeEditor(); return; }
@@ -13828,10 +13873,9 @@ function registerEnvCards() {
         row.className = "env-row env-row-btn env-memory";
         row.innerHTML = `<span class="env-memory-type">${escHtml(memoryTypeLabel(m.type))}</span>` +
           `<span class="env-row-text">${escHtml(m.name)}</span>`;
-        if (m.description) {
-          row.setAttribute("data-tip", m.description);
-          row.setAttribute("data-tip-delay", "700");
-        }
+        row.setAttribute("data-tip", (m.description ? m.description + " — " : "") + memoryDatesText(m));
+        row.setAttribute("data-tip-delay", "700");
+        if (memoryIsStale(m)) row.classList.add("is-stale");
         row.addEventListener("click", () => openMemoryView(collection, m.name));
         body.appendChild(row);
       }

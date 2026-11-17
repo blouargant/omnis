@@ -136,11 +136,23 @@ edit or delete that memory. The environment panel's **Memory** card lists the
 current collection's memories, and **`/memory`** opens the current collection's
 memory list (in its **Edit context** dialog; for General, the memory list alone).
 
-There are four types: **Feedback** (how you want the work done) and **User**
-(who you are, your preferences) are given to the agent in full on every turn;
-**Project** (decisions, constraints, dates) and **Reference** (links, where
-things live) are listed by name and description, and the agent opens the ones it
-needs. A memory is at most 4,000 characters, and a collection holds at most 200.
+There are four types: **Feedback** (how you want the work done), **User** (who
+you are, your preferences), **Project** (decisions, constraints, dates) and
+**Reference** (links, where things live). All are given to the agent in full on
+every turn; when they no longer fit, the least confirmed and least recent ones
+are shortened to one line, and the agent opens them when needed. A memory is at
+most 4,000 characters, and a collection holds at most 200.
+
+Every memory carries **when it was saved**, **when it was last changed** and
+**how many times you restated it** (saying again what it already says counts as
+a confirmation; changing it resets the count). The agent sees these dates and
+today's date: when two memories disagree, or a memory and what you say now, the
+most recent wins and the agent corrects the older one; when it relies on a
+project fact or a reference that is months old, it gives the date and says it
+may be out of date. Rules and facts about you do not expire with age. In the
+memory list, **Oldest first** sorts by the last time a memory was said or
+changed, and a project fact or reference untouched for 90 days is marked
+**old** — a good place to start a clean-up.
 
 Good to know:
 

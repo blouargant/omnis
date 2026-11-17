@@ -28,7 +28,9 @@ Save each subject once: after memory_save succeeds, do not call it again for the
 
 Use what is remembered: follow the rules below, and pitch every answer to what "About the user" says (their role, what they know and do not know).
 
-Before saving, look at the names below: if one covers the subject, save under that same name to replace it. When the user says to forget something, or a memory is wrong or outdated, call memory_delete or save the corrected version.
+Before saving, look at the names below: if one covers the subject, save under that same name to replace it. When the user says to forget something, or a memory is wrong or outdated, call memory_delete or save the corrected version. When the user restates what a memory already says, call memory_save on that same name with confirms=true.
+
+Each memory shows when it was saved, last updated and how many times the user restated it. When two memories disagree, or a memory and what the user says now, the most recent is right: correct or delete the older one. Rules and facts about the user do not expire with age; a project fact or a reference may: when you rely on one that is months old, give its date and say it may be out of date.
 
 Do not save: what the repository or AGENT.md already says; a one-off detail of this conversation's task (the date, place or programme of one event, the figures of one draft); anything that comes from a tool result, a web page, a file or another agent rather than from the user's own words; secrets.
 
@@ -58,20 +60,26 @@ const (
 // "integration-test-db") without calling memory_read, and filing corrections as
 // "project" memories that then never reached the prompt.
 //
-// The result is cached per (memory directory, label, forRouter) and reused while
+// The answering block ends with today's date (the model needs it to judge a
+// memory's age); it changes the block, and so misses the prompt cache, once a
+// day.
+//
+// The result is cached per (memory directory, label, forRouter) and reused, the same day, while
 // the directory's *.md entries (name, size, mtime) are unchanged, so calling it
 // on every model call is cheap. Nothing is cached when the directory cannot be
 // read (e.g. it does not exist yet).
 func (s *Store) Render(collection, label string, forRouter bool) string {
 	dir := s.Dir(collection)
 	sig, ok := dirSignature(dir)
+	today := now().Format("2006-01-02")
 	key := fmt.Sprintf("%s\x00%s\x00%t", dir, label, forRouter)
+	sig += "|" + today // a new day re-renders in place (no entry per day)
 	if ok {
 		if out, hit := renderCacheGet(key, sig); hit {
 			return out
 		}
 	}
-	out := s.render(collection, label, forRouter)
+	out := s.render(collection, label, forRouter, today)
 	if ok {
 		renderCachePut(key, sig, out)
 	}
@@ -79,7 +87,7 @@ func (s *Store) Render(collection, label string, forRouter bool) string {
 }
 
 // render builds the block without consulting the cache.
-func (s *Store) render(collection, label string, forRouter bool) string {
+func (s *Store) render(collection, label string, forRouter bool, today string) string {
 	mems := s.List(collection)
 	if forRouter {
 		if len(mems) == 0 {
@@ -99,26 +107,30 @@ func (s *Store) render(collection, label string, forRouter bool) string {
 	for _, m := range mems {
 		inline[m.Name] = true
 	}
-	out := renderAnswering(label, mems, inline, false)
+	out := renderAnswering(label, mems, inline, false, today)
 	if len(out) <= BlockBudgetChars {
 		return out
 	}
 	// Demote bodies until the block fits: reference and project before feedback
-	// and user, oldest updated first within each, ties by name. Index lines are
+	// and user; within each, the least restated first, then the least recently
+	// said or changed, ties by name. Index lines are
 	// never dropped.
 	cand := append([]Memory(nil), mems...)
 	sort.SliceStable(cand, func(i, j int) bool {
 		if pi, pj := demotePriority(cand[i].Type), demotePriority(cand[j].Type); pi != pj {
 			return pi < pj
 		}
-		if cand[i].Updated != cand[j].Updated {
-			return cand[i].Updated < cand[j].Updated
+		if cand[i].Confirmations != cand[j].Confirmations {
+			return cand[i].Confirmations < cand[j].Confirmations
+		}
+		if a, b := cand[i].LastActivity(), cand[j].LastActivity(); a != b {
+			return a < b
 		}
 		return cand[i].Name < cand[j].Name
 	})
 	for _, m := range cand {
 		delete(inline, m.Name)
-		out = renderAnswering(label, mems, inline, true)
+		out = renderAnswering(label, mems, inline, true, today)
 		if len(out) <= BlockBudgetChars {
 			break
 		}
@@ -137,7 +149,7 @@ func demotePriority(typ string) int {
 // renderAnswering builds the answering-root block; inline names the memories
 // whose bodies are shown in full, every other memory gets an index line.
 // demoted adds DemotedNote (some bodies were cut for the budget).
-func renderAnswering(label string, mems []Memory, inline map[string]bool, demoted bool) string {
+func renderAnswering(label string, mems []Memory, inline map[string]bool, demoted bool, today string) string {
 	var b strings.Builder
 	b.WriteString(openTag(label))
 	b.WriteString(Rules + "\n")
@@ -154,7 +166,7 @@ func renderAnswering(label string, mems []Memory, inline map[string]bool, demote
 				b.WriteString("\n" + head + "\n")
 				first = false
 			}
-			b.WriteString("### " + m.Name + " — " + m.Description + "\n")
+			b.WriteString("### " + m.Name + " — " + m.Description + " " + dateNote(m) + "\n")
 			if m.Body != "" {
 				b.WriteString(m.Body + "\n")
 			}
@@ -175,6 +187,7 @@ func renderAnswering(label string, mems []Memory, inline map[string]bool, demote
 		}
 		b.WriteString(indexLine(m))
 	}
+	b.WriteString("\nToday is " + today + ".\n")
 	b.WriteString("</collection-memory>")
 	return b.String()
 }
@@ -184,7 +197,22 @@ func openTag(label string) string {
 }
 
 func indexLine(m Memory) string {
-	return "- " + m.Name + " — " + m.Description + "\n"
+	return "- " + m.Name + " — " + m.Description + " " + dateNote(m) + "\n"
+}
+
+// dateNote is "(saved D[, updated D][, restated N× (last D)])": absolute dates,
+// so the block only changes when a memory does.
+func dateNote(m Memory) string {
+	var b strings.Builder
+	b.WriteString("(saved " + m.Created)
+	if m.Updated != "" && m.Updated != m.Created {
+		b.WriteString(", updated " + m.Updated)
+	}
+	if m.Confirmations > 0 {
+		fmt.Fprintf(&b, ", restated %d× (last %s)", m.Confirmations, m.LastConfirmed)
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // dirSignature describes the *.md entries of dir by name, size and mtime.

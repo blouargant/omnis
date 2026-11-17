@@ -1074,5 +1074,13 @@
   "preview.missing": "Diese Datei kann nicht gelesen werden: {path}",
   "preview.tooLarge": "Diese Datei ist für eine Vorschau zu groß.",
   "preview.menu": "Vorschau",
-  "preview.open": "In der Vorschau anzeigen"
+  "preview.open": "In der Vorschau anzeigen",
+  "memory.savedOn": "Gespeichert am {date}",
+  "memory.updatedOn": "geändert am {date}",
+  "memory.restated.one": "einmal wiederholt (zuletzt am {date})",
+  "memory.restated.other": "{count}-mal wiederholt (zuletzt am {date})",
+  "memory.stale": "alt",
+  "memory.staleTip": "Ein Projektfakt oder Verweis, den seit über {days} Tagen niemand wiederholt oder geändert hat: prüfen Sie, ob er noch stimmt.",
+  "memory.sortType": "Nach Typ",
+  "memory.sortAge": "Älteste zuerst"
 }

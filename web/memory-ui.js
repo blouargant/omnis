@@ -38,5 +38,37 @@ function memoryChipLabel(toolName, result) {
   return null;
 }
 
-if (typeof module !== "undefined" && module.exports) module.exports = { isMemoryTool, memoryResult, memoryToolFailed, memoryChipLabel };
-else { window.isMemoryTool = isMemoryTool; window.memoryResult = memoryResult; window.memoryToolFailed = memoryToolFailed; window.memoryChipLabel = memoryChipLabel; }
+// memoryLastActivity is when the user last said or changed a memory: the later
+// of its update date and its last confirmation (YYYY-MM-DD strings compare).
+function memoryLastActivity(m) {
+  const u = (m && m.updated) || "";
+  const c = (m && m.last_confirmed) || "";
+  return c > u ? c : u;
+}
+
+// MEMORY_STALE_DAYS: a project fact or a reference nobody said or changed for
+// this long is flagged for review. Rules and facts about the user do not age.
+const MEMORY_STALE_DAYS = 90;
+
+// memoryIsStale reports a project/reference memory whose last activity is more
+// than MEMORY_STALE_DAYS before today (a Date, default now).
+function memoryIsStale(m, today) {
+  if (!m || (m.type !== "project" && m.type !== "reference")) return false;
+  const last = memoryLastActivity(m);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(last)) return false;
+  const t = today instanceof Date ? today : new Date();
+  const ms = Date.UTC(t.getFullYear(), t.getMonth(), t.getDate()) - Date.parse(last + "T00:00:00Z");
+  return ms > MEMORY_STALE_DAYS * 86400000;
+}
+
+// memoriesByAge orders memories oldest last activity first, ties by name.
+function memoriesByAge(list) {
+  return [...(list || [])].sort((a, b) => {
+    const x = memoryLastActivity(a), y = memoryLastActivity(b);
+    if (x !== y) return x < y ? -1 : 1;
+    return (a.name || "") < (b.name || "") ? -1 : 1;
+  });
+}
+
+if (typeof module !== "undefined" && module.exports) module.exports = { isMemoryTool, memoryResult, memoryToolFailed, memoryChipLabel, memoryLastActivity, memoryIsStale, memoriesByAge, MEMORY_STALE_DAYS };
+else { window.isMemoryTool = isMemoryTool; window.memoryResult = memoryResult; window.memoryToolFailed = memoryToolFailed; window.memoryChipLabel = memoryChipLabel; window.memoryLastActivity = memoryLastActivity; window.memoryIsStale = memoryIsStale; window.memoriesByAge = memoriesByAge; }

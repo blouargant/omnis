@@ -1074,5 +1074,13 @@
   "preview.missing": "Impossible de lire ce fichier : {path}",
   "preview.tooLarge": "Ce fichier est trop volumineux pour être prévisualisé.",
   "preview.menu": "Aperçu",
-  "preview.open": "Afficher dans l'aperçu"
+  "preview.open": "Afficher dans l'aperçu",
+  "memory.savedOn": "Enregistrée le {date}",
+  "memory.updatedOn": "modifiée le {date}",
+  "memory.restated.one": "redite une fois (dernière le {date})",
+  "memory.restated.other": "redite {count} fois (dernière le {date})",
+  "memory.stale": "ancienne",
+  "memory.staleTip": "Un fait de projet ou une référence que personne n'a redit ni modifié depuis plus de {days} jours : vérifiez qu'il est toujours vrai.",
+  "memory.sortType": "Par type",
+  "memory.sortAge": "Plus anciennes d'abord"
 }

@@ -23,6 +23,7 @@ type memorySaveIn struct {
 	Description string `json:"description"`
 	Type        string `json:"type"`
 	Content     string `json:"content"`
+	Confirms    bool   `json:"confirms,omitempty" jsonschema:"true when the user restated what this existing memory already says (it is counted as a confirmation); false for anything new or changed"`
 }
 
 type memorySaveOut struct {
@@ -41,7 +42,9 @@ type memoryReadOut struct {
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
 	Type        string `json:"type,omitempty"`
+	Created     string `json:"created,omitempty"`
 	Updated     string `json:"updated,omitempty"`
+	Restated    int    `json:"restated,omitempty"`
 	Content     string `json:"content,omitempty"`
 	Error       string `json:"error,omitempty"`
 }
@@ -132,12 +135,16 @@ func memorySave(ctx context.Context, sessionID string, in memorySaveIn) memorySa
 		return memorySaveOut{Error: errMemEmpty}
 	}
 	store, col := memoryStoreFor(sessionID)
-	saved, created, err := store.Save(col, collmem.Memory{
+	mode := collmem.SaveChange
+	if in.Confirms {
+		mode = collmem.SaveConfirm
+	}
+	saved, created, err := store.SaveWith(col, collmem.Memory{
 		Name:        in.Name,
 		Description: in.Description,
 		Type:        strings.TrimSpace(in.Type),
 		Body:        in.Content,
-	})
+	}, mode)
 	if err != nil {
 		return memorySaveOut{Error: memoryErrorMessage(err)}
 	}
@@ -164,7 +171,9 @@ func memoryRead(sessionID, name string) memoryReadOut {
 		Name:        m.Name,
 		Description: m.Description,
 		Type:        m.Type,
+		Created:     m.Created,
 		Updated:     m.Updated,
+		Restated:    m.Confirmations,
 		Content:     m.Body,
 	}
 }
@@ -240,7 +249,7 @@ func mustMemoryTool[A, R any](name, desc string, h functiontool.Func[A, R]) tool
 func memoryTools(verify memoryVerifier, notes func(sessionID string) []string) []tool.Tool {
 	return []tool.Tool{
 		mustMemoryTool("memory_save",
-			"Save or replace one memory of this collection, so later conversations here know it. Call it whenever the user corrects you, states a lasting rule or fact, or asks you to remember something. Use the name of an existing memory to replace it.",
+			"Save or replace one memory of this collection, so later conversations here know it. Call it whenever the user corrects you, states a lasting rule or fact, or asks you to remember something. Use the name of an existing memory to replace it; set confirms=true when the user only restated what it already says.",
 			func(tc adk.ToolContext, in memorySaveIn) (memorySaveOut, error) {
 				sid := realSessionID(tc)
 				if !memoryWrites.allow(sid, tc.InvocationID()) {

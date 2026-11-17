@@ -11,10 +11,12 @@ doesn't have to go looking for it.
 - **Scope** — each collection has its own memories; chats outside any
   collection share **General**'s.
 - **What is kept** — four types: **Feedback** (corrections and confirmed ways of
-  working) and **User** (who you are, your preferences) are given to the agent in
-  full on every turn; **Project** (decisions, constraints, dates) and
-  **Reference** (links, where things live) are listed by name, and the agent
-  opens the ones it needs.
+  working), **User** (who you are, your preferences), **Project** (decisions,
+  constraints, dates) and **Reference** (links, where things live), all given to
+  the agent on every turn.
+- **Dated** — each memory shows when it was saved, last changed and how many
+  times you restated it; in a conflict the most recent wins, and old project
+  facts are flagged for review.
 - **What is not** — what the repository or `AGENT.md` already says, what only
   matters to the current chat, anything that came from a web page, a file, a
   tool's output or another agent, and secrets.
