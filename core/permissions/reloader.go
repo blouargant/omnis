@@ -111,7 +111,16 @@ func (r *Reloader) reload(force bool) error {
 			err = oerr
 		}
 	}
-	overlays = append(overlays, r.staticOverlays...)
+	// A skill's permissions.json adds rules; it never changes the session's
+	// mode (it would otherwise win as the highest overlay).
+	for _, so := range r.staticOverlays {
+		if so == nil {
+			continue
+		}
+		rulesOnly := *so
+		rulesOnly.Permissions.DefaultMode, rulesOnly.Permissions.ModeSet = ModeDefault, false
+		overlays = append(overlays, &rulesOnly)
+	}
 
 	merged := Merge(base, overlays...)
 	r.rules.Store(merged)

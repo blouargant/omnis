@@ -3364,6 +3364,18 @@ calls fall through to the mode default (ask in `default` mode).
   a plain path inside the working dir (no `$`, `~`, quotes, globs, redirect).
   Pinned by `TestShippedAcceptEditsStaysInTheWorkingDir`; its dirs must not be
   under `/tmp`, which the shipped `Edit(//tmp/**)` allow covers anyway.
+- **The highest layer that names a `defaultMode` wins** (`Merge`,
+  [permissions.go](core/permissions/permissions.go); `PermSet.ModeSet` records
+  that a file named one, `"default"` included, and `PermSet.MarshalJSON` keeps
+  it on an "Allow always" rewrite). `Merge` used to take the BASE (system)
+  layer's mode unless it had none, so once `acceptEdits` shipped, every
+  user-layer mode was ignored: a user's `"default"` (stricter) chosen in
+  Settings — which displays the merged value correctly — ran as `acceptEdits`,
+  and a bench's `bypassPermissions` still raised `cd /…` cards (the memory
+  bench's `correction` scenario failed 0/3 on balanced, 4/4 after the fix). A
+  skill's `permissions.json` adds rules but never sets the mode (the reloader
+  strips it from static overlays). Pinned by
+  [mode_merge_test.go](core/permissions/mode_merge_test.go).
 - **Modes** (`defaultMode`): `default`/`acceptEdits`/`plan`/`dontAsk`/
   `bypassPermissions`/`auto` — applied in `CheckArgs` (bypass & plan are
   authoritative; the rest only change the unmatched-call default). The Bash

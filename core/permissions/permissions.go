@@ -102,6 +102,41 @@ type PermSet struct {
 	Ask                   []Rule   `json:"ask"`
 	Deny                  []Rule   `json:"deny"`
 	AdditionalDirectories []string `json:"additionalDirectories,omitempty"`
+	// ModeSet reports that the file named a defaultMode (even "default"), so a
+	// layer can set it back to "default" over a lower layer's other mode.
+	ModeSet bool `json:"-"`
+}
+
+// UnmarshalJSON records whether defaultMode was present (ModeSet).
+func (p *PermSet) UnmarshalJSON(data []byte) error {
+	type plain PermSet
+	var a plain
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	var probe map[string]json.RawMessage
+	_ = json.Unmarshal(data, &probe)
+	*p = PermSet(a)
+	_, p.ModeSet = probe["defaultMode"]
+	return nil
+}
+
+// MarshalJSON writes defaultMode whenever the file named one, "default"
+// included: dropping it on a rewrite ("Allow always" persists through this)
+// would hand the mode back to a lower layer.
+func (p PermSet) MarshalJSON() ([]byte, error) {
+	type out struct {
+		DefaultMode           string   `json:"defaultMode,omitempty"`
+		Allow                 []Rule   `json:"allow"`
+		Ask                   []Rule   `json:"ask"`
+		Deny                  []Rule   `json:"deny"`
+		AdditionalDirectories []string `json:"additionalDirectories,omitempty"`
+	}
+	o := out{Allow: p.Allow, Ask: p.Ask, Deny: p.Deny, AdditionalDirectories: p.AdditionalDirectories}
+	if p.ModeSet || p.DefaultMode != ModeDefault {
+		o.DefaultMode = p.DefaultMode.String()
+	}
+	return json.Marshal(o)
 }
 
 // Config is the top-level permissions.json document.
@@ -131,12 +166,20 @@ func (c *Config) compile() {
 }
 
 // Merge returns a new Config combining base with each overlay appended in
-// order (base rules first within each tier). DefaultMode/AdditionalDirectories
-// come from base unless empty, in which case the first overlay that sets them
-// wins.
+// order (base rules first within each tier). AdditionalDirectories accumulate.
+// DefaultMode comes from the HIGHEST config that names one (ModeSet), like any
+// other scalar of the layered config: a user's "bypassPermissions" or "default"
+// wins over the shipped "acceptEdits". Configs built in code (no ModeSet) keep
+// the old rule: the first non-default mode, base first.
+//
+// It used to take base's mode unless base had none: once the shipped system
+// layer set "acceptEdits", every user-layer defaultMode was silently ignored —
+// a bench's bypassPermissions still raised cards, and a user who chose
+// "default" in Settings (stricter) got acceptEdits.
 func Merge(base *Config, overlays ...*Config) *Config {
 	merged := &Config{Permissions: PermSet{
 		DefaultMode:           base.Permissions.DefaultMode,
+		ModeSet:               base.Permissions.ModeSet,
 		AdditionalDirectories: append([]string(nil), base.Permissions.AdditionalDirectories...),
 		Allow:                 append([]Rule(nil), base.Permissions.Allow...),
 		Ask:                   append([]Rule(nil), base.Permissions.Ask...),
@@ -150,7 +193,11 @@ func Merge(base *Config, overlays ...*Config) *Config {
 		merged.Permissions.Ask = append(merged.Permissions.Ask, o.Permissions.Ask...)
 		merged.Permissions.Deny = append(merged.Permissions.Deny, o.Permissions.Deny...)
 		merged.Permissions.AdditionalDirectories = append(merged.Permissions.AdditionalDirectories, o.Permissions.AdditionalDirectories...)
-		if merged.Permissions.DefaultMode == ModeDefault {
+		switch {
+		case o.Permissions.ModeSet:
+			merged.Permissions.DefaultMode = o.Permissions.DefaultMode
+			merged.Permissions.ModeSet = true
+		case !merged.Permissions.ModeSet && merged.Permissions.DefaultMode == ModeDefault:
 			merged.Permissions.DefaultMode = o.Permissions.DefaultMode
 		}
 	}
