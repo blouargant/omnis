@@ -8070,6 +8070,167 @@ async function editCollectionContext(c, opts = {}) {
 // openCollectionMemory opens a collection's context dialog on its memory
 // section. General has no instructions or profile, so its dialog shows the
 // memory list only. Used by /memory and by General's ⋯ menu.
+// openMemoryReview asks the server for clean-up proposals on a collection's
+// memories (merges, rewrites, deletions, plus a check for each project fact or
+// reference untouched for 90 days) and lets the user approve them one by one.
+// Nothing is written until "Apply"; an operation on a memory that changed in
+// the meantime is skipped server-side.
+async function openMemoryReview(collection) {
+  const key = memoryCollectionKey(collection);
+  const label = key;
+  const overlay = uiModalShell(tr("memory.reviewTitle", { name: label }));
+  overlay.querySelector(".ui-modal").classList.add("memory-review-modal");
+  const body = overlay.querySelector(".user-cmd-modal-body");
+  const ok = overlay.querySelector(".ui-modal-ok");
+  const cancel = overlay.querySelector(".ui-modal-cancel");
+  ok.textContent = tr("memory.reviewApply");
+  ok.disabled = true;
+  cancel.textContent = tr("common.cancel");
+  const close = () => { overlay.remove(); document.removeEventListener("keydown", onKey, true); };
+  const onKey = (e) => {
+    const all = document.querySelectorAll(".ui-modal-overlay");
+    if (e.key === "Escape" && all[all.length - 1] === overlay) { e.preventDefault(); close(); }
+  };
+  document.addEventListener("keydown", onKey, true);
+  overlay.querySelector(".ui-modal-close").addEventListener("click", close);
+  cancel.addEventListener("click", close);
+  body.innerHTML = `<div class="mr-loading">${escHtml(tr("memory.reviewLoading"))}</div>`;
+
+  const base = `/api/collections/${encodeURIComponent(key)}/memories`;
+  let ops = [], mems = [], err = "";
+  try {
+    const [res, list] = await Promise.all([apiFetch(`${base}/review`, { method: "POST" }), loadMemories(collection)]);
+    const b = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(b.error || res.statusText);
+    ops = Array.isArray(b.ops) ? b.ops : [];
+    err = b.error || "";
+    mems = list || [];
+  } catch (e) {
+    err = String(e.message || e);
+  }
+  if (!overlay.isConnected) return;
+  const byName = new Map(mems.map(m => [m.name, m]));
+  body.innerHTML = "";
+  if (err) {
+    const note = document.createElement("div");
+    note.className = "mr-error";
+    note.textContent = tr("memory.reviewFailed", { error: err });
+    body.appendChild(note);
+  }
+  if (!ops.length) {
+    const none = document.createElement("div");
+    none.className = "mr-empty";
+    none.textContent = tr("memory.reviewNothing");
+    body.appendChild(none);
+    cancel.textContent = tr("common.close");
+    ok.hidden = true;
+    return;
+  }
+  const intro = document.createElement("div");
+  intro.className = "mr-intro";
+  intro.textContent = tr("memory.reviewIntro");
+  body.appendChild(intro);
+
+  const rows = [];
+  const memBlock = (m) => {
+    const d = document.createElement("div");
+    d.className = "mr-mem";
+    if (!m) return d;
+    d.innerHTML = `<div class="mr-mem-head"><span class="mr-mem-name"></span><span class="mr-mem-dates"></span></div><div class="mr-mem-body"></div>`;
+    d.querySelector(".mr-mem-name").textContent = `${m.name} · ${memoryTypeLabel(m.type)}`;
+    d.querySelector(".mr-mem-dates").textContent = memoryDatesText(m);
+    d.querySelector(".mr-mem-body").textContent = m.body || "";
+    return d;
+  };
+  for (const op of ops) {
+    const card = document.createElement("div");
+    card.className = "mr-op mr-op-" + op.op;
+    const head = document.createElement("label");
+    head.className = "mr-op-head";
+    let control;
+    if (op.op === "check") {
+      control = document.createElement("select");
+      control.className = "mr-check";
+      for (const [v, k] of [["", "memory.reviewLeave"], ["keep", "memory.reviewKeep"], ["delete", "memory.reviewDelete"]]) {
+        const o = document.createElement("option");
+        o.value = v; o.textContent = tr(k);
+        control.appendChild(o);
+      }
+    } else {
+      control = document.createElement("input");
+      control.type = "checkbox";
+      control.checked = true;
+    }
+    const title = document.createElement("span");
+    title.className = "mr-op-title";
+    const names = op.names.join(", ");
+    title.textContent = op.op === "merge" ? tr("memory.reviewMerge", { names, into: op.into.name })
+      : op.op === "update" ? tr("memory.reviewUpdate", { name: names })
+      : op.op === "delete" ? tr("memory.reviewDeleteOp", { names })
+      : tr("memory.reviewCheck", { name: names });
+    head.append(control, title);
+    card.appendChild(head);
+    if (op.reason) {
+      const r = document.createElement("div");
+      r.className = "mr-op-reason";
+      r.textContent = op.reason;
+      card.appendChild(r);
+    } else if (op.op === "check") {
+      const r = document.createElement("div");
+      r.className = "mr-op-reason";
+      r.textContent = tr("memory.reviewCheckWhy", { days: 90 });
+      card.appendChild(r);
+    }
+    if (op.into) {
+      const after = document.createElement("div");
+      after.className = "mr-after";
+      after.innerHTML = `<div class="mr-after-label"></div><div class="mr-after-desc"></div><div class="mr-mem-body"></div>`;
+      after.querySelector(".mr-after-label").textContent = tr("memory.reviewResult");
+      after.querySelector(".mr-after-desc").textContent = op.into.description || "";
+      after.querySelector(".mr-mem-body").textContent = op.into.content || "";
+      card.appendChild(after);
+      const det = document.createElement("details");
+      det.className = "mr-before";
+      det.innerHTML = `<summary></summary>`;
+      det.querySelector("summary").textContent = tr("memory.reviewBefore");
+      for (const n of op.names) det.appendChild(memBlock(byName.get(n)));
+      card.appendChild(det);
+    } else {
+      for (const n of op.names) card.appendChild(memBlock(byName.get(n)));
+    }
+    body.appendChild(card);
+    rows.push({ op, control });
+  }
+  const refreshOk = () => {
+    ok.disabled = !rows.some(r => r.op.op === "check" ? r.control.value : r.control.checked);
+  };
+  for (const r of rows) r.control.addEventListener("change", refreshOk);
+  refreshOk();
+
+  ok.addEventListener("click", async () => {
+    const chosen = rows.filter(r => r.op.op === "check" ? r.control.value : r.control.checked)
+      .map(r => Object.assign({}, r.op, r.op.op === "check" ? { decision: r.control.value } : {}));
+    ok.disabled = true;
+    try {
+      const res = await apiFetch(`${base}/review/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ops: chosen }),
+      });
+      const b = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(b.error || res.statusText);
+      const skipped = (b.skipped || []).length;
+      showToast(skipped ? tr("memory.reviewDoneSkipped", { n: b.applied || 0, skipped })
+        : tr("memory.reviewDone", { n: b.applied || 0 }), skipped ? "err" : undefined);
+      onMemoryChanged({ collection });
+      close();
+    } catch (e) {
+      showToast(tr("memory.reviewFailed", { error: String(e.message || e) }), "err");
+      ok.disabled = false;
+    }
+  });
+}
+
 function openCollectionMemory(collection) {
   const key = memoryCollectionKey(collection);
   if (key === GENERAL_COLLECTION) {
@@ -8170,6 +8331,7 @@ function collectionContextDialog(name, snap, opts = {}) {
       <div class="user-cmd-field cc-grow-mem">
         <div class="cc-mem-head">
           <span class="user-cmd-field-label cc-label-row cc-mem-label">${escHtml(tr("collections.memory"))}</span>
+          <button type="button" class="cc-mem-review" data-tip="${escHtml(tr("memory.reviewTip"))}">${escHtml(tr("memory.review"))}</button>
           <button type="button" class="cc-mem-add">${escHtml(tr("memory.add"))}</button>
         </div>
         <div class="cc-mem-list"></div>
@@ -8202,6 +8364,7 @@ function collectionContextDialog(name, snap, opts = {}) {
 
     const memList = buildMemoryList(body.querySelector(".cc-mem-list"), name);
     body.querySelector(".cc-mem-add").addEventListener("click", () => memList.add());
+    body.querySelector(".cc-mem-review").addEventListener("click", () => openMemoryReview(name));
 
     // Embed the drafting assistant (help write the instructions).
     if (!memoryOnly) {
@@ -11374,7 +11537,7 @@ const BUILTIN_SLASH_COMMANDS = [
   { cmd: "/compress",      args: "",           desc: "Trigger context compression before the next model call", kind: "common", builtin: true },
   { cmd: "/init",          args: "",           desc: "Analyze the repo and write a starter AGENT.md", kind: "common", builtin: true },
   { cmd: "/cost",          args: "",           desc: "Alias for /usage", kind: "common", builtin: true },
-  { cmd: "/memory",        args: "",           desc: tr("slash.memory"), kind: "common", builtin: true },
+  { cmd: "/memory",        args: "[review]",   desc: tr("slash.memory"), kind: "common", builtin: true },
   { cmd: "/rollback",      args: "[N|all]",    desc: "Undo recent settings changes (revert the last one, N of them, or all)", kind: "common", builtin: true },
   // Session — actions/info about the current conversation.
   { cmd: "/status",        args: "",           desc: "Show current session info", kind: "session", builtin: true },
@@ -12423,12 +12586,13 @@ async function handleSlashCommand(raw, panel) {
 
     case "memory": {
       // The focused session's collection; a draft tab ⇒ the collection picked
-      // in its picker; an editor tab ⇒ General.
-      if (!panel.sessionId && isDraft(panel.activeTab)) {
-        openCollectionMemory(panel._pickerCollection || draftDefaultCollection() || GENERAL_COLLECTION);
-      } else {
-        openCollectionMemory(await memoryCollectionOf(panel.sessionId));
-      }
+      // in its picker; an editor tab ⇒ General. "/memory review" opens the
+      // clean-up review instead of the list.
+      const col = (!panel.sessionId && isDraft(panel.activeTab))
+        ? (panel._pickerCollection || draftDefaultCollection() || GENERAL_COLLECTION)
+        : await memoryCollectionOf(panel.sessionId);
+      if (/^review$/i.test(argPart)) openMemoryReview(col);
+      else openCollectionMemory(col);
       break;
     }
 

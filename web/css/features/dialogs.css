@@ -345,7 +345,8 @@
   justify-content: space-between;
   gap: 8px;
 }
-.cc-mem-add {
+.cc-mem-add,
+.cc-mem-review {
   font-size: 11px;
   padding: 3px 8px;
   border: 1px solid var(--border);
@@ -354,7 +355,8 @@
   color: var(--text);
   cursor: pointer;
 }
-.cc-mem-add:hover { border-color: var(--accent, #0e639c); }
+.cc-mem-add:hover,
+.cc-mem-review:hover { border-color: var(--accent, #0e639c); }
 
 /* The collection's memories, grouped by type: one row per memory (name +
    description), expanding to an inline editor. The list scrolls on its own
@@ -1391,3 +1393,23 @@
 .memory-modal .user-cmd-field select,
 .memory-modal .user-cmd-field textarea { font: inherit; }
 .user-cmd-modal-footer .memory-modal-delete { margin-right: auto; }
+
+/* /memory review (openMemoryReview). */
+.memory-review-modal { width: min(720px, 94vw); }
+.memory-review-modal .user-cmd-modal-body { max-height: 70vh; overflow: auto; }
+.mr-loading, .mr-empty { color: var(--text-muted); padding: 12px 0; }
+.mr-error { color: var(--warn-fg); margin-bottom: 8px; }
+.mr-intro { color: var(--text-muted); font-size: 12.5px; margin-bottom: 10px; }
+.mr-op { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 8px; }
+.mr-op-head { display: flex; gap: 8px; align-items: center; font-weight: 500; cursor: pointer; }
+.mr-op-reason { color: var(--text-muted); font-size: 12.5px; margin: 4px 0 6px; }
+.mr-check { font: inherit; font-size: 12.5px; }
+.mr-mem, .mr-after { font-size: 12.5px; margin-top: 4px; }
+.mr-mem-head { display: flex; gap: 8px; justify-content: space-between; color: var(--text-muted); }
+.mr-mem-name { font-weight: 500; color: var(--text); }
+.mr-mem-body { white-space: pre-wrap; background: var(--accent-bg-soft); border-radius: var(--radius-sm); padding: 6px 8px; margin-top: 2px; }
+.mr-after-label { font-weight: 500; }
+.mr-after-desc { color: var(--text-muted); }
+.mr-before summary { cursor: pointer; color: var(--text-muted); font-size: 12px; margin-top: 6px; }
+.cc-mem-review { margin-left: auto; }
+.cc-mem-review + .cc-mem-add { margin-left: 6px; }

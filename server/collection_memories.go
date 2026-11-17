@@ -196,3 +196,123 @@ func memoryReadOnlyFor(kind string) bool {
 func memoryReadOnlyForSession(kind string, hidden bool) bool {
 	return hidden || memoryReadOnlyFor(kind)
 }
+
+// handleReviewMemories: POST /api/collections/:name/memories/review → {"ops":[…],
+// "error"?}. One model call proposes merges, rewrites and deletions; checks for
+// stale project facts and references are added by the host. Nothing is written.
+func handleReviewMemories(d serverDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		col, ok := resolveMemoryCollection(c)
+		if !ok {
+			return
+		}
+		mems := memoryStoreForRequest(c, col).List(col)
+		ops, err := d.Manager.ReviewMemories(c.Request.Context(), mems)
+		if ops == nil {
+			ops = []toolkitagent.ReviewOp{}
+		}
+		out := gin.H{"ops": ops, "count": len(mems)}
+		if err != nil {
+			out["error"] = err.Error()
+		}
+		c.JSON(http.StatusOK, out)
+	}
+}
+
+// reviewDecision is one approved operation: the op as proposed, plus for a
+// "check" the user's answer ("keep" = still true, counted as a confirmation;
+// "delete").
+type reviewDecision struct {
+	toolkitagent.ReviewOp
+	Decision string `json:"decision,omitempty"`
+}
+
+// handleApplyReview: POST /api/collections/:name/memories/review/apply with
+// {"ops":[…approved…]} → {"applied":n,"skipped":[{"names","error"}]}. An
+// operation whose memories changed since the proposal is skipped.
+func handleApplyReview(d serverDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		col, ok := resolveMemoryCollection(c)
+		if !ok {
+			return
+		}
+		var in struct {
+			Ops []reviewDecision `json:"ops"`
+		}
+		if err := c.ShouldBindJSON(&in); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		store := memoryStoreForRequest(c, col)
+		applied, skipped := applyReviewOps(store, col, in.Ops)
+		if applied > 0 {
+			broadcastMemoryChangeFromRoute(d, c, col, "", "updated")
+		}
+		if skipped == nil {
+			skipped = []gin.H{}
+		}
+		c.JSON(http.StatusOK, gin.H{"applied": applied, "skipped": skipped})
+	}
+}
+
+// applyReviewOps applies approved operations one by one.
+func applyReviewOps(store *collmem.Store, col string, ops []reviewDecision) (int, []gin.H) {
+	applied := 0
+	var skipped []gin.H
+	skip := func(op reviewDecision, msg string) {
+		skipped = append(skipped, gin.H{"names": op.Names, "error": msg})
+	}
+	for _, op := range ops {
+		if len(op.Names) == 0 {
+			continue
+		}
+		changed := false
+		for _, n := range op.Names {
+			m, found := store.Get(col, n)
+			if !found || toolkitagent.MemoryVersion(m) != op.Versions[n] {
+				changed = true
+				break
+			}
+		}
+		if changed {
+			skip(op, "changed since the review")
+			continue
+		}
+		var err error
+		switch op.Op {
+		case toolkitagent.ReviewMerge, toolkitagent.ReviewUpdate:
+			if op.Into == nil {
+				skip(op, "nothing to write")
+				continue
+			}
+			into := collmem.Memory{Name: op.Into.Name, Type: op.Into.Type, Description: op.Into.Description, Body: op.Into.Content}
+			_, err = store.MergeInto(col, into, op.Names)
+		case toolkitagent.ReviewDelete:
+			for _, n := range op.Names {
+				if _, derr := store.Delete(col, n); derr != nil && err == nil {
+					err = derr
+				}
+			}
+		case toolkitagent.ReviewCheck:
+			m, _ := store.Get(col, op.Names[0])
+			switch op.Decision {
+			case "keep":
+				_, _, err = store.SaveWith(col, m, collmem.SaveConfirm)
+			case "delete":
+				_, err = store.Delete(col, m.Name)
+			default:
+				continue
+			}
+		default:
+			skip(op, "unknown operation")
+			continue
+		}
+		if err != nil {
+			_, msg := memoryRouteError(err)
+			skip(op, msg)
+			continue
+		}
+		applied++
+	}
+	return applied, skipped
+}

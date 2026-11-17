@@ -35,7 +35,7 @@ func TestSaveModesKeepDatesAndCountConfirmations(t *testing.T) {
 	s.SaveWith("", m, SaveConfirm)
 	at(t, "2026-10-09")
 	got, _, _ := s.SaveWith("", m, SaveConfirm)
-	if got.Created != "2026-10-01" || got.Updated != "2026-10-09" || got.Confirmations != 2 || got.LastConfirmed != "2026-10-09" {
+	if got.Created != "2026-10-01" || got.Updated != "2026-10-01" || got.Confirmations != 2 || got.LastConfirmed != "2026-10-09" {
 		t.Fatalf("after two confirmations: %+v", got)
 	}
 	if g, _ := s.Get("", "tabs"); g.Confirmations != 2 || g.Created != "2026-10-01" {
@@ -86,7 +86,7 @@ func TestRenderShowsDatesAndToday(t *testing.T) {
 	at(t, "2026-11-17")
 	out := s.Render("P", "P", false)
 	for _, want := range []string{
-		"### tabs — Use tabs (saved 2026-10-01, updated 2026-10-08, restated 1× (last 2026-10-08))",
+		"### tabs — Use tabs (saved 2026-10-01, restated 1× (last 2026-10-08))",
 		"### db — Staging DB (saved 2026-10-08)",
 		"Today is 2026-11-17.",
 		"the most recent is right",

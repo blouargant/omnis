@@ -80,7 +80,7 @@ same colour/size in multiple partials.
 | `tools.css` | Tool-call blocks, todo plan widget, bash `!`-escape block, badge colour variants |
 | `composer.css` | Composer input, attach button, attachment chips, attach popup menu, slash-command menu |
 | `context.css` | Context ring, context popup, context browser modal |
-| `dialogs.css` | User-command modal, push-notification banner, ask-user wizard card, Archived sessions dialog (`.archived-modal*`) |
+| `dialogs.css` | User-command modal, push-notification banner, ask-user wizard card, Archived sessions dialog (`.archived-modal*`), collection context + memory list (`.cc-mem-*`), memory view (`.memory-modal-*`) and memory review (`.memory-review-modal`, `.mr-*`) |
 | `notifications.css` | Background-task / monitor toast notifications (`#task-toast-layer`, `.task-toast`) |
 | `responsive.css` | **Small-screen (≤820px) layout**: lifts `#sidebar` out of the flow into a full-height off-canvas drawer (`body.nav-open`, `#nav-scrim`), gives `#chat-area` the full viewport, forces a single pane, `100dvh` + safe-area. Imported **last** so its media-query rules win. Also the `(pointer: coarse)` **touch block**: reveals every hover-only control (session-row actions, collection-header ＋/⋯, turn/copy buttons, tab ×) and enlarges the chrome buttons to tappable sizes |
 

@@ -172,31 +172,11 @@ func (s *Store) SaveWith(collection string, m Memory, mode SaveMode) (saved Memo
 	if dir == "" {
 		return Memory{}, false, ErrCollection
 	}
-	name, ok := NormalizeName(m.Name)
-	if !ok {
-		return Memory{}, false, ErrInvalidName
+	saved, err = prepare(m)
+	if err != nil {
+		return Memory{}, false, err
 	}
-	if !ValidType(m.Type) {
-		return Memory{}, false, ErrInvalidType
-	}
-	body := strings.TrimRight(strings.TrimLeft(m.Body, "\r\n"), " \t\r\n")
-	if utf8.RuneCountInString(body) > MaxBodyChars {
-		return Memory{}, false, ErrTooLarge
-	}
-	desc := truncateRunes(oneLine(m.Description), MaxDescriptionRunes)
-	if desc == "" {
-		first, _, _ := strings.Cut(strings.TrimSpace(body), "\n")
-		desc = truncateRunes(strings.TrimSpace(first), 80)
-	}
-	today := now().Format("2006-01-02")
-	saved = Memory{
-		Name:        name,
-		Description: desc,
-		Type:        m.Type,
-		Created:     today,
-		Updated:     today,
-		Body:        body,
-	}
+	name, today := saved.Name, saved.Updated
 
 	lock := dirLock(dir)
 	lock.Lock()
@@ -212,6 +192,9 @@ func (s *Store) SaveWith(collection string, m Memory, mode SaveMode) (saved Memo
 				saved.Confirmations, saved.LastConfirmed = old.Confirmations, old.LastConfirmed
 			case SaveConfirm:
 				saved.Confirmations, saved.LastConfirmed = old.Confirmations+1, today
+				if old.Body == saved.Body && old.Type == saved.Type {
+					saved.Updated = old.Updated // restated, not changed
+				}
 			}
 		}
 	} else if os.IsNotExist(statErr) {
@@ -226,6 +209,86 @@ func (s *Store) SaveWith(collection string, m Memory, mode SaveMode) (saved Memo
 		return Memory{}, false, err
 	}
 	return saved, created, nil
+}
+
+// prepare validates m and returns the memory to write, dated today.
+func prepare(m Memory) (Memory, error) {
+	name, ok := NormalizeName(m.Name)
+	if !ok {
+		return Memory{}, ErrInvalidName
+	}
+	if !ValidType(m.Type) {
+		return Memory{}, ErrInvalidType
+	}
+	body := strings.TrimRight(strings.TrimLeft(m.Body, "\r\n"), " \t\r\n")
+	if utf8.RuneCountInString(body) > MaxBodyChars {
+		return Memory{}, ErrTooLarge
+	}
+	desc := truncateRunes(oneLine(m.Description), MaxDescriptionRunes)
+	if desc == "" {
+		first, _, _ := strings.Cut(strings.TrimSpace(body), "\n")
+		desc = truncateRunes(strings.TrimSpace(first), 80)
+	}
+	today := now().Format("2006-01-02")
+	return Memory{Name: name, Description: desc, Type: m.Type, Created: today, Updated: today, Body: body}, nil
+}
+
+// ErrNotFound is returned when a memory an operation needs does not exist.
+var ErrNotFound = errors.New("collmem: memory not found")
+
+// MergeInto writes into and removes the other sources, in one locked step. The
+// merged memory keeps the earliest creation date, the sum of the sources'
+// confirmations and the latest confirmation date. into may reuse a source's
+// name or take a new one, never the name of another memory.
+func (s *Store) MergeInto(collection string, into Memory, sources []string) (Memory, error) {
+	dir := s.Dir(collection)
+	if dir == "" {
+		return Memory{}, ErrCollection
+	}
+	saved, err := prepare(into)
+	if err != nil {
+		return Memory{}, err
+	}
+	lock := dirLock(dir)
+	lock.Lock()
+	defer lock.Unlock()
+
+	isSource := map[string]bool{}
+	for _, raw := range sources {
+		n, ok := NormalizeName(raw)
+		if !ok {
+			return Memory{}, ErrInvalidName
+		}
+		old, found := readMemory(filepath.Join(dir, n+".md"), n)
+		if !found {
+			return Memory{}, ErrNotFound
+		}
+		isSource[n] = true
+		if old.Created != "" && old.Created < saved.Created {
+			saved.Created = old.Created
+		}
+		saved.Confirmations += old.Confirmations
+		if old.LastConfirmed > saved.LastConfirmed {
+			saved.LastConfirmed = old.LastConfirmed
+		}
+	}
+	path := filepath.Join(dir, saved.Name+".md")
+	if !isSource[saved.Name] {
+		if _, err := os.Stat(path); err == nil {
+			return Memory{}, ErrInvalidName // would overwrite another memory
+		}
+	}
+	if err := writeAtomic(dir, path, render(saved)); err != nil {
+		return Memory{}, err
+	}
+	for n := range isSource {
+		if n != saved.Name {
+			if err := os.Remove(filepath.Join(dir, n+".md")); err != nil && !os.IsNotExist(err) {
+				return saved, err
+			}
+		}
+	}
+	return saved, nil
 }
 
 // Get returns one memory, or false when it is absent or unreadable.

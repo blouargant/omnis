@@ -4237,7 +4237,36 @@ It replaced soft-skills (see "Soft-skills removed" at the end of this section).
   `web/tests/memory_age.test.mjs`): dates in the memory view and on list rows,
   a **By type / Oldest first** toggle, and project/reference memories untouched
   for 90 days marked **old** (also in the env panel's Memory card). Pinned by
-  [internal/collmem/dates_test.go](internal/collmem/dates_test.go).
+  [internal/collmem/dates_test.go](internal/collmem/dates_test.go). A
+  `SaveConfirm` with unchanged body and type keeps `updated` (restated, not
+  changed).
+- **Memory review (`/memory review`)** — [agent/memory_review.go](agent/memory_review.go)
+  `Manager.ReviewMemories`: one non-streamed call on the current generation's
+  **leader** model (user-initiated, rare, quality matters; 3 min timeout) with
+  every memory and its dates → `{"ops":[merge|update|delete]}`; `validateReviewOps`
+  drops ops naming an unknown memory, reusing a memory already in another op,
+  taking another memory's name, or writing an invalid memory, pins each touched
+  memory's `MemoryVersion`, and the HOST adds a `check` op for every
+  project/reference stale for `MemoryStaleDays` (90) — deterministic, not the
+  model's call. Nothing is written by the review. Routes
+  ([server/collection_memories.go](server/collection_memories.go)): `POST
+  /api/collections/:name/memories/review` → `{ops, count, error?}` (stale checks
+  are returned even when the model call fails); `POST …/review/apply`
+  `{ops:[…approved…, decision for checks: keep|delete]}` → `{applied, skipped}`
+  — an op whose memories changed since the proposal (version mismatch) is
+  skipped. Merge/update go through `collmem.MergeInto` (one locked step: write
+  the result, remove the other sources; earliest `created`, summed
+  confirmations, latest `last_confirmed`); a check's *keep* is a `SaveConfirm`.
+  Web: `openMemoryReview` ([web/app.js](web/app.js)) — one card per op
+  (checkbox, or Leave/Still true/Delete for a check), reason, result and the
+  current memories; entry points `/memory review` and the **Review** button in
+  the memory list. Tested live on a messy set (duplicate rule, contradicted DB
+  name, past one-off event, old wiki link, old user profile): premium and
+  balanced merged the duplicate, deleted the contradicted fact, checked the old
+  link and left the profile alone; balanced once rewrote the contradicted
+  memory into a copy of the newer one, which the prompt now forbids. Pinned by
+  [agent/memory_review_test.go](agent/memory_review_test.go) and
+  [server/memory_review_test.go](server/memory_review_test.go).
 - **Routes** ([server/collection_memories.go](server/collection_memories.go),
   owner-scoped via `userRoot(requestLogin(c))`): `GET /api/collections/:name/memories`
   → `{memories}`, `PUT …/memories/:mem` `{description, type, body}` →

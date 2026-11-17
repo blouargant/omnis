@@ -154,6 +154,18 @@ memory list, **Oldest first** sorts by the last time a memory was said or
 changed, and a project fact or reference untouched for 90 days is marked
 **old** — a good place to start a clean-up.
 
+**Memory review.** `/memory review` (or the **Review** button above the memory
+list) asks the model to propose a clean-up: **merge** memories that say the same
+thing, **rewrite** or **delete** one that a more recent memory contradicts,
+delete one that only concerned a one-off task, and — for every project fact or
+reference untouched for 90 days — ask whether it is **still true**. Each
+proposal shows its reason, the result and the current memories; untick what you
+want to keep as it is, answer the "still true?" questions (*Still true* counts
+as a confirmation, *Delete* removes it), then **Apply**. Nothing changes before
+that, and a proposal on a memory edited in the meantime is skipped. A merged
+memory keeps the earliest creation date and the confirmations of what it
+merges.
+
 Good to know:
 
 - Memory belongs to the **collection**: a chat moved to another collection sees
