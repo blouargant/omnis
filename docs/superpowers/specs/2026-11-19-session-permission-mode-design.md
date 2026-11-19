@@ -177,19 +177,34 @@ switch.
 filled for every event that has a session (tool events in
 `hookToolCallbacks`, UserPromptSubmit/Stop in the plugin, bus-driven events
 and server `FireHook` from their session id) through a resolver on
-`Infrastructure` (`PermissionModeFor(sessionID) string`: override, else the `defaultMode` of
-the session's **pinned** generation's permission source (`Manager.Peek`, so a
-draining session's hooks and gate agree; builder's call), spelled as Claude Code: `default`, `acceptEdits`, `plan`, `auto`,
+`Infrastructure` (`PermissionModeFor(sessionID) string`: override, else the
+config `defaultMode` — the permission reloader re-reads `permissions.json` live
+whatever the generation, so every generation sees the same config mode and no
+pinning is needed; spelled as Claude Code: `default`, `acceptEdits`, `plan`, `auto`,
 `dontAsk`, `bypassPermissions`). Plugin hooks and omnis hooks get it alike.
 Hooks still run before the permission gate (chain order unchanged).
 
-A hook's own `ask` (handled by `askHookPermission`, not the gate) follows the
-mode as follows:
-- `dontAsk`: the ask becomes a block ("dontAsk mode: the hook asked for
-  confirmation").
-- `auto`, `bypassPermissions`, and every other mode: still asked to the user —
-  a hook that asks wants a human decision, never a model's.
-- The hook also sees `permission_mode` and may adapt itself.
+Who wins between a hook and the session's mode (decided with the user):
+
+- A hook's **deny / block** blocks in every mode, `bypassPermissions`
+  included (as in Claude Code). A deny is the hook saying no, knowing the mode;
+  a hook that wants to step aside in a mode reads `permission_mode` and answers
+  `allow` instead.
+- A hook's **`ask`** (handled by `askHookPermission`, not the gate) is a
+  question to the user, so it follows the mode:
+  - `bypassPermissions`: **allowed**, no question — "bypass" means passing over
+    permission questions, not refusing them. The allow also grants the usual
+    hook clearance for that call.
+  - `auto`: judged by the classifier like a default-ask call (same prompt,
+    same escalation counters; the hook's reason is given to the judge). Judge
+    error ⇒ ask the user, or deny when nobody can answer.
+  - `dontAsk`: blocked ("dontAsk mode: the hook asked for confirmation").
+  - `default`, `acceptEdits`, `plan`: asked to the user, as today.
+- Consequence, accepted: the Kubernetes hook escalates a refusal to `ask`
+  after three identical attempts, so in `bypassPermissions` such a change goes
+  through on the third retry. Its terminal refusal (no `APPROVED` reviewer
+  attestation, the validator acting itself) is a deny and still blocks in every
+  mode. In a shared deployment the administrator can forbid `bypass` (§4).
 
 ### 8. Surfaces
 
@@ -227,7 +242,8 @@ under the in-development section.
 - Gate: auto allow / block / error→ask / escalation after 3 blocks, with a
   fake judge.
 - Hooks: `permission_mode` present in PreToolUse input for a session with an
-  override and for one without.
+  override and for one without; a hook `ask` is allowed in bypass, judged in
+  auto, blocked in dontAsk, asked otherwise; a hook deny blocks in bypass.
 - Server: route round trip, persistence across `LoadPersistedSessions`, fork
   inheritance, cookie owner scoping (existing route-enumeration test covers
   `ownerGuard`).
