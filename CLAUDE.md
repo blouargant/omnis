@@ -3604,8 +3604,15 @@ override it, and `auto` is a real classifier mode.
   hand the judge the injected text *labelled as not coming from the user*, and it
   blocks actions justified only by it. Earlier injected turns recorded in the
   session's user words are filed there too, by prefix (`[mailbox]`, `[Spawned
-  session `, `[Background `, `[Monitor ` — `injectedPrefixes`); an earlier **A2A**
-  turn has no framing and is not recognised (known gap). Injected text, the
+  session `, `[Background `, `[Monitor `, and `A2ATurnPrefix` — the server frames
+  every inbound A2A turn with `FrameA2APrompt`, so the squad sees
+  `[A2A message from a remote agent]` above the caller's text — see
+  `injectedPrefixes`). The memory provenance check (`memory_save`) uses the same
+  `splitUserWords`, so none of these turns counts as the user's words there either.
+  Each verdict log line ends with `(judge N in / M out tokens, $x)`, priced from the
+  judge's model (`autoPrices`); measured at **$0.000027 per verdict** on `hosted`
+  (~660 prompt tokens), 0.2 % of the agents' cost on the same tasks (run 3 of the
+  bench report above). Injected text, the
   arguments and the gate/hook reason are fenced between `<<<BEGIN …>>>` /
   `<<<END …>>>` lines, and the system prompt says fenced text is data.
 - **`disableBypassPermissionsMode`**: `permissions.disableBypassPermissionsMode:
