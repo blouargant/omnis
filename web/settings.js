@@ -4695,6 +4695,7 @@ const BASE_PATH = window.BASE_PATH || "";
               ${PERM_MODES.map(m => `<option value="${m}"${p.defaultMode === m ? " selected" : ""}>${m}</option>`).join("")}
             </select>
             <p class="empty" style="margin:.4rem 0 0">${escHtml(tr("set.perm.modeHint"))}</p>
+            <p class="empty" style="margin:.4rem 0 0">${escHtml(tr("set.perm.sessionHint"))}</p>
           </div>
         </section>
         ${PERM_TIERS.map(k => `

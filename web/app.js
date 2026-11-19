@@ -233,7 +233,7 @@ const PANE_EL_IDS = {
   composerWrap: "composer-wrap", composer: "composer", prompt: "prompt",
   editModeBtn: "edit-mode-btn", slashBtn: "slash-btn", slashMenu: "slash-menu",
   send: "send", cancel: "cancel", status: "status",
-  ctxRingWrap: "ctx-ring-wrap", ctxRingSvg: "ctx-ring-svg",
+  ctxRingWrap: "ctx-ring-wrap", ctxRingSvg: "ctx-ring-svg", permModeBtn: "perm-mode-btn",
   ctxPopup: "ctx-popup", ctxPopUsed: "ctx-pop-used", ctxPopMax: "ctx-pop-max",
   ctxPopPct: "ctx-pop-pct", ctxPopBudget: "ctx-pop-budget", ctxPopAgents: "ctx-pop-agents",
   ctxCompactBtn: "ctx-compact-btn", composerResize: "composer-resize",
@@ -342,6 +342,7 @@ function mountInPanel(panel, sessionId) {
   // after a restart, or when first opening the session in this browser).
   if (sessionId && !sessionGoals.has(sessionId)) refreshGoal(sessionId);
   if (sessionId && !sessionSkills.has(sessionId)) refreshSkills(sessionId);
+  if (sessionId && !sessionPermMode.has(sessionId)) refreshPermMode(sessionId);
 }
 
 function setFocusedPanel(pid) {
@@ -1423,6 +1424,7 @@ function attachPaneHandlers(panel) {
   });
 
   // Context ring popup.
+  pe.permModeBtn.addEventListener("click", (e) => { e.stopPropagation(); openPermModeMenu(panel); });
   pe.ctxRingWrap.addEventListener("click", (e) => {
     e.stopPropagation();
     if (pe.ctxPopup.hasAttribute("hidden")) openCtxPopup(panel);
@@ -1570,6 +1572,11 @@ function onPromptKeydown(e, panel) {
   // above keeps priority (it returns on Tab); any other case keeps Tab's default.
   if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !e.isComposing) {
     if (acceptSuggestion(panel)) { e.preventDefault(); return; }
+  }
+  // Shift+Tab cycles the session's permission mode (the slash/!/@ menu block
+  // above has already returned for an open menu).
+  if (e.key === "Tab" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !e.isComposing) {
+    if (permModeInfo(panel)) { e.preventDefault(); cyclePermMode(panel); return; }
   }
   if (sendOnEnter) {
     if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
@@ -1851,6 +1858,7 @@ function applySessionUI(id) {
     renderGoalChip(p);
     renderSkillsDock(p);
     renderSubtleAsk(p);
+    renderPermPastille(p);
   }
   // Refresh tab chrome (busy dot) on every pane holding this session as a tab,
   // including background tabs whose session is streaming.
@@ -2398,6 +2406,7 @@ const ICON_TAB_CLOSE = `<svg width="12" height="12" viewBox="0 0 24 24" fill="no
 function renderPaneTabs(panel) {
   const strip = panel.els.tabs;
   if (!strip) return;
+  renderPermPastille(panel);
   strip.innerHTML = "";
   for (const key of panel.tabs) {
     const draft = isDraft(key);
@@ -3732,6 +3741,105 @@ function wireFileDock() {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+// ─── Session permission mode (pastille + menu) ───────────────────────────────
+
+const sessionPermMode = new Map(); // sid → {mode, effective, config_mode, bypass_disabled}
+const draftPermModes = new Map();  // draft tab key → chosen mode ("" = follow settings)
+let lastPermConfig = { config_mode: "default", bypass_disabled: false };
+
+async function refreshPermMode(sid) {
+  try {
+    const res = await apiFetch(`/api/sessions/${encodeURIComponent(sid)}/permission-mode`);
+    if (!res.ok) return;
+    const d = await res.json();
+    sessionPermMode.set(sid, d);
+    lastPermConfig = { config_mode: d.config_mode || "default", bypass_disabled: !!d.bypass_disabled };
+    for (const p of panelsForSession(sid)) renderPermPastille(p);
+  } catch (_) { /* pastille stays hidden/stale */ }
+}
+
+// permModeInfo returns the pane's active tab's mode state, or null when the tab
+// carries no pastille (editor tabs, empty panes).
+function permModeInfo(panel) {
+  if (!panel) return null;
+  const key = panel.activeTab;
+  if (key && isDraft(key)) {
+    const mode = draftPermModes.get(key) || "";
+    return { mode, effective: mode || lastPermConfig.config_mode, config_mode: lastPermConfig.config_mode,
+             bypass_disabled: lastPermConfig.bypass_disabled, draft: true };
+  }
+  if (panel.sessionId && sessionPermMode.has(panel.sessionId)) return sessionPermMode.get(panel.sessionId);
+  return null;
+}
+
+function renderPermPastille(panel) {
+  const btn = panel && panel.els.permModeBtn;
+  if (!btn) return;
+  const info = permModeInfo(panel);
+  btn.hidden = !info;
+  if (!info) return;
+  btn.dataset.mode = info.effective;
+  btn.classList.toggle("is-override", !!info.mode);
+  btn.querySelector(".perm-mode-label").textContent = info.effective;
+  btn.setAttribute("data-tip", tr("permmode.tip", { mode: info.effective }));
+  btn.setAttribute("aria-label", tr("permmode.set", { mode: info.effective }));
+}
+
+// setPermMode applies a mode ("" = follow settings) to the pane's session, or
+// to its draft. Returns true on success.
+async function setPermMode(panel, mode) {
+  const key = panel.activeTab;
+  if (key && isDraft(key)) {
+    if (mode) draftPermModes.set(key, mode); else draftPermModes.delete(key);
+    renderPermPastille(panel);
+    return true;
+  }
+  const sid = panel.sessionId;
+  if (!sid) return false;
+  try {
+    const res = await apiFetch(`/api/sessions/${encodeURIComponent(sid)}/permission-mode`, {
+      method: "PUT", body: JSON.stringify({ mode }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = tr("permmode.failed", { reason: d.error || res.statusText });
+      appendCommandBubble(msg, true, panel);
+      return false;
+    }
+    sessionPermMode.set(sid, d);
+    for (const p of panelsForSession(sid)) renderPermPastille(p);
+    return true;
+  } catch (e) {
+    showToast(tr("permmode.failed", { reason: String(e) }), "err");
+    return false;
+  }
+}
+
+function cyclePermMode(panel) {
+  const info = permModeInfo(panel);
+  if (!info) return;
+  setPermMode(panel, window.PermMode.cycleMode(info.effective, !info.bypass_disabled));
+}
+
+function openPermModeMenu(panel) {
+  const info = permModeInfo(panel);
+  const btn = panel.els.permModeBtn;
+  if (!info || !btn) return;
+  const PM = window.PermMode;
+  const items = [[
+    (info.mode === "" ? "✓ " : "") + tr("permmode.follow", { mode: info.config_mode }),
+    () => setPermMode(panel, ""),
+  ]];
+  for (const m of PM.MODES) {
+    if (m === "bypassPermissions" && info.bypass_disabled) continue;
+    items.push([`${info.mode === m ? "✓ " : ""}${m} — ${tr(PM.modeLabelKey(m))}`, () => setPermMode(panel, m)]);
+  }
+  const r = btn.getBoundingClientRect();
+  showFolderCtxMenu({ preventDefault() {}, stopPropagation() {}, clientX: r.left, clientY: r.top }, items);
+  const m = ensureFolderCtxMenu();
+  m.style.top = Math.max(4, r.top - m.offsetHeight - 6) + "px";
+}
 
 function setStatus(panel, s) {
   if (!panel || !panel.els.status) return;
@@ -9473,7 +9581,7 @@ function closeTab(panel, key) {
   }
   const wasActive = panel.activeTab === key;
   panel.tabs.splice(idx, 1);
-  if (isDraft(key)) draftDirs.delete(key);
+  if (isDraft(key)) { draftDirs.delete(key); draftPermModes.delete(key); }
   // Editor tabs live in at most one pane; free the model once it's gone.
   if (editor && panelsWithTab(key).length === 0) disposeEditor(editorPathOf(key));
   // Session-only cleanup (push subscription); editor keys have none.
@@ -9820,6 +9928,8 @@ async function newChat(panel, squadOverride, dirOverride, collectionOverride) {
   try {
     const body = { squad };
     if (dir) body.dir = dir;
+    const draftPerm = draftKey ? draftPermModes.get(draftKey) : "";
+    if (draftPerm) body.permission_mode = draftPerm;
     // File the new chat under the requested collection (General ⇒ leave
     // un-filed). The server ignores an unknown collection.
     const collection = collectionOverride || (draftKey && panel._pickerCollection) || GENERAL_COLLECTION;
@@ -9847,7 +9957,7 @@ async function newChat(panel, squadOverride, dirOverride, collectionOverride) {
     const newId = data.session_id;
     // The squad picked on the draft was for this chat only: the next draft
     // starts again on the default squad.
-    if (draftKey) { draftDirs.delete(draftKey); resetPickerSquad(panel); }
+    if (draftKey) { draftDirs.delete(draftKey); draftPermModes.delete(draftKey); resetPickerSquad(panel); }
 
     // Open the new session as a tab in the pane and make it active. If the
     // active tab is a pending draft, the session takes that draft's slot.
@@ -10067,6 +10177,10 @@ async function subscribeGlobalEvents() {
           const moved = sessionMetaById(sid);
           if (moved) moved.collection = (data && data.collection) || "";
           if (window.EnvPanel) EnvPanel.refresh("memory");
+        } else if (event === "permission_mode_changed" && sid) {
+          const cur = sessionPermMode.get(sid) || {};
+          sessionPermMode.set(sid, { ...cur, mode: (data && data.mode) || "", effective: (data && data.effective) || cur.effective || "default" });
+          for (const p of panelsForSession(sid)) renderPermPastille(p);
         } else if (event === "session_rewound" && sid) {
           clearSuggestion(sid);
           refreshSkills(sid);
@@ -11543,6 +11657,7 @@ const BUILTIN_SLASH_COMMANDS = [
   { cmd: "/status",        args: "",           desc: "Show current session info", kind: "session", builtin: true },
   { cmd: "/usage",         args: "",           desc: "Show this session's token usage and estimated cost", kind: "session", builtin: true },
   { cmd: "/recap",         args: "",           desc: "Summarise the current session", kind: "session", builtin: true },
+  { cmd: "/mode",          args: "[name]",    desc: tr("slash.mode"), kind: "session", builtin: true },
   { cmd: "/fork",          args: "",           desc: "Branch a new session inheriting this conversation's full context", kind: "session", builtin: true },
   { cmd: "/spawn",         args: "<name> [@squad]: <task>", desc: "Start a fresh session (empty context) in this folder; text after ':' is a task run in the background; omit @squad to let the router pick", kind: "session", builtin: true },
   { cmd: "/btw",           args: "<question>", desc: "Ask a quick side question — not saved to the conversation", kind: "session", builtin: true },
@@ -12442,6 +12557,27 @@ async function handleSlashCommand(raw, panel) {
         resolveAsideBlock(body, String(err), true);
       }
       scrollBottom(panel, true);
+      break;
+    }
+
+    case "mode": {
+      if (!permModeInfo(panel)) {
+        appendCommandBubble("No active session — start a chat first.", true, panel);
+        return;
+      }
+      if (!argPart) { openPermModeMenu(panel); break; }
+      const want = argPart.toLowerCase();
+      const follow = ["follow", "config", "settings", "none", "default-config"].includes(want);
+      const found = window.PermMode.MODES.find(m => m.toLowerCase() === want);
+      if (!follow && !found) {
+        appendCommandBubble(tr("permmode.bad", { mode: argPart, modes: window.PermMode.MODES.join(", ") }), true, panel);
+        break;
+      }
+      const ok = await setPermMode(panel, follow ? "" : found);
+      if (ok) {
+        const info = permModeInfo(panel);
+        appendCommandBubble(tr("permmode.set", { mode: info ? info.effective : found }), false, panel);
+      }
       break;
     }
 

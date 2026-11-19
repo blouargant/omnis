@@ -1102,5 +1102,19 @@
   "memory.reviewResult": "Résultat",
   "memory.reviewBefore": "Mémoires actuelles",
   "memory.reviewDone": "Revue de la mémoire : {n} changements appliqués.",
-  "memory.reviewDoneSkipped": "Revue de la mémoire : {n} appliqués, {skipped} ignorés (modifiés depuis la revue)."
+  "memory.reviewDoneSkipped": "Revue de la mémoire : {n} appliqués, {skipped} ignorés (modifiés depuis la revue).",
+  "permmode.desc.default": "Demander avant les modifications et commandes",
+  "permmode.desc.acceptEdits": "Les modifications dans le dossier de travail sont autorisées",
+  "permmode.desc.plan": "Lecture seule : rechercher et planifier, sans modifier",
+  "permmode.desc.auto": "Un classifieur approuve les actions courantes et demande pour les risquées",
+  "permmode.desc.dontAsk": "Ne jamais demander : tout ce qu'une règle n'autorise pas est refusé",
+  "permmode.desc.bypassPermissions": "Tout autoriser (le garde-fou de sécurité reste actif)",
+  "permmode.follow": "Suivre les réglages ({mode})",
+  "permmode.tip": "Mode de permission : {mode} — cliquer pour changer, Maj+Tab pour parcourir",
+  "permmode.title": "Mode de permission",
+  "permmode.set": "Mode de permission : {mode}",
+  "permmode.bad": "Mode inconnu « {mode} ». Choisir : {modes}",
+  "permmode.failed": "Impossible de changer le mode de permission : {reason}",
+  "slash.mode": "Afficher ou définir le mode de permission de cette session",
+  "set.perm.sessionHint": "Chaque conversation peut remplacer ce mode (pastille au-dessus du composeur, Maj+Tab ou /mode)."
 }

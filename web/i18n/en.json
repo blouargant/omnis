@@ -1102,5 +1102,19 @@
   "memory.reviewResult": "Result",
   "memory.reviewBefore": "Current memories",
   "memory.reviewDone": "Memory review: {n} changes applied.",
-  "memory.reviewDoneSkipped": "Memory review: {n} applied, {skipped} skipped (changed since the review)."
+  "memory.reviewDoneSkipped": "Memory review: {n} applied, {skipped} skipped (changed since the review).",
+  "permmode.desc.default": "Ask before edits and commands",
+  "permmode.desc.acceptEdits": "Edits inside the working folder are allowed",
+  "permmode.desc.plan": "Read-only: research and plan, no changes",
+  "permmode.desc.auto": "A classifier approves routine actions, asks for risky ones",
+  "permmode.desc.dontAsk": "Never ask: anything not allowed by a rule is denied",
+  "permmode.desc.bypassPermissions": "Allow everything (the safety floor still applies)",
+  "permmode.follow": "Follow settings ({mode})",
+  "permmode.tip": "Permission mode: {mode} — click to change, Shift+Tab to cycle",
+  "permmode.title": "Permission mode",
+  "permmode.set": "Permission mode: {mode}",
+  "permmode.bad": "Unknown mode \"{mode}\". Choose: {modes}",
+  "permmode.failed": "Could not change the permission mode: {reason}",
+  "slash.mode": "Show or set this session's permission mode",
+  "set.perm.sessionHint": "Each chat can override this mode (pastille above the composer, Shift+Tab or /mode)."
 }

@@ -809,3 +809,32 @@ body.resizing-composer #composer-resize { transition: none; }
 #edit-mode-btn[hidden],
 #slash-btn[hidden],
 #cancel[hidden] { display: none; }
+
+/* ─── Permission-mode pastille (composer actions) ─────────────
+   #composer-wrap is pointer-events:none; opt back in (see loaded-skills GOTCHA). */
+.perm-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font: 500 11.5px/1 ui-monospace, "SF Mono", Menlo, monospace;
+  cursor: pointer;
+  flex-shrink: 0;
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
+}
+.perm-mode-btn[hidden] { display: none; }
+.perm-mode-btn:hover { color: var(--text-strong, var(--text)); border-color: var(--text-muted); }
+.perm-mode-btn.is-override { color: var(--text-strong, var(--text)); }
+.perm-mode-btn[data-mode="plan"] { color: #3b82c4; border-color: #3b82c455; }
+.perm-mode-btn[data-mode="auto"] { color: var(--accent); border-color: var(--accent); }
+.perm-mode-btn[data-mode="acceptEdits"] { color: #3a9a63; border-color: #3a9a6355; }
+.perm-mode-btn[data-mode="dontAsk"],
+.perm-mode-btn[data-mode="bypassPermissions"] { color: #c0443a; border-color: #c0443a66; }
+@media (max-width: 820px) { .perm-mode-btn .perm-mode-label { display: none; } .perm-mode-btn { padding: 0 7px; } }

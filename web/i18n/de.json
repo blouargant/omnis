@@ -1102,5 +1102,19 @@
   "memory.reviewResult": "Ergebnis",
   "memory.reviewBefore": "Aktuelle Erinnerungen",
   "memory.reviewDone": "Gedächtnis-Überprüfung: {n} Änderungen angewendet.",
-  "memory.reviewDoneSkipped": "Gedächtnis-Überprüfung: {n} angewendet, {skipped} übersprungen (seit der Überprüfung geändert)."
+  "memory.reviewDoneSkipped": "Gedächtnis-Überprüfung: {n} angewendet, {skipped} übersprungen (seit der Überprüfung geändert).",
+  "permmode.desc.default": "Vor Änderungen und Befehlen nachfragen",
+  "permmode.desc.acceptEdits": "Änderungen im Arbeitsordner sind erlaubt",
+  "permmode.desc.plan": "Nur Lesen: recherchieren und planen, keine Änderungen",
+  "permmode.desc.auto": "Ein Klassifikator genehmigt Routineaktionen und fragt bei riskanten nach",
+  "permmode.desc.dontAsk": "Nie nachfragen: was keine Regel erlaubt, wird abgelehnt",
+  "permmode.desc.bypassPermissions": "Alles erlauben (die Sicherheitsgrenze bleibt aktiv)",
+  "permmode.follow": "Einstellungen folgen ({mode})",
+  "permmode.tip": "Berechtigungsmodus: {mode} — klicken zum Ändern, Umschalt+Tab zum Durchschalten",
+  "permmode.title": "Berechtigungsmodus",
+  "permmode.set": "Berechtigungsmodus: {mode}",
+  "permmode.bad": "Unbekannter Modus „{mode}“. Wählen: {modes}",
+  "permmode.failed": "Berechtigungsmodus konnte nicht geändert werden: {reason}",
+  "slash.mode": "Berechtigungsmodus dieser Sitzung anzeigen oder setzen",
+  "set.perm.sessionHint": "Jeder Chat kann diesen Modus überschreiben (Anzeige über dem Eingabefeld, Umschalt+Tab oder /mode)."
 }

@@ -1102,5 +1102,19 @@
   "memory.reviewResult": "Resultado",
   "memory.reviewBefore": "Memorias actuales",
   "memory.reviewDone": "Revisión de la memoria: {n} cambios aplicados.",
-  "memory.reviewDoneSkipped": "Revisión de la memoria: {n} aplicados, {skipped} omitidos (modificados desde la revisión)."
+  "memory.reviewDoneSkipped": "Revisión de la memoria: {n} aplicados, {skipped} omitidos (modificados desde la revisión).",
+  "permmode.desc.default": "Preguntar antes de editar y ejecutar comandos",
+  "permmode.desc.acceptEdits": "Se permiten las ediciones dentro de la carpeta de trabajo",
+  "permmode.desc.plan": "Solo lectura: investigar y planificar, sin cambios",
+  "permmode.desc.auto": "Un clasificador aprueba las acciones rutinarias y pregunta por las de riesgo",
+  "permmode.desc.dontAsk": "Nunca preguntar: lo que ninguna regla permita se deniega",
+  "permmode.desc.bypassPermissions": "Permitir todo (el límite de seguridad sigue activo)",
+  "permmode.follow": "Seguir los ajustes ({mode})",
+  "permmode.tip": "Modo de permisos: {mode} — clic para cambiar, Mayús+Tab para recorrer",
+  "permmode.title": "Modo de permisos",
+  "permmode.set": "Modo de permisos: {mode}",
+  "permmode.bad": "Modo desconocido «{mode}». Elija: {modes}",
+  "permmode.failed": "No se pudo cambiar el modo de permisos: {reason}",
+  "slash.mode": "Mostrar o fijar el modo de permisos de esta sesión",
+  "set.perm.sessionHint": "Cada chat puede reemplazar este modo (indicador sobre el compositor, Mayús+Tab o /mode)."
 }
