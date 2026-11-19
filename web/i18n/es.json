@@ -1116,5 +1116,7 @@
   "permmode.bad": "Modo desconocido «{mode}». Elija: {modes}",
   "permmode.failed": "No se pudo cambiar el modo de permisos: {reason}",
   "slash.mode": "Mostrar o fijar el modo de permisos de esta sesión",
-  "set.perm.sessionHint": "Cada chat puede reemplazar este modo (indicador sobre el compositor, Mayús+Tab o /mode)."
+  "set.perm.sessionHint": "Cada chat puede reemplazar este modo (indicador sobre el compositor, Mayús+Tab o /mode).",
+  "picker.permissions": "Permisos",
+  "picker.permissionsAria": "Modo de permisos del nuevo chat"
 }

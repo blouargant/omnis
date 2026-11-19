@@ -1116,5 +1116,7 @@
   "permmode.bad": "Mode inconnu « {mode} ». Choisir : {modes}",
   "permmode.failed": "Impossible de changer le mode de permission : {reason}",
   "slash.mode": "Afficher ou définir le mode de permission de cette session",
-  "set.perm.sessionHint": "Chaque conversation peut remplacer ce mode (pastille au-dessus du composeur, Maj+Tab ou /mode)."
+  "set.perm.sessionHint": "Chaque conversation peut remplacer ce mode (pastille au-dessus du composeur, Maj+Tab ou /mode).",
+  "picker.permissions": "Permissions",
+  "picker.permissionsAria": "Mode de permission de la nouvelle conversation"
 }

@@ -669,3 +669,14 @@
   color: var(--text, #eee);
 }
 .pane-search-item.is-agent { border-left-color: var(--accent, #4a9eff); }
+
+.pane-picker-perm-select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  background: var(--bg-raised, #2a2d2e);
+  color: var(--text, #eee);
+  font-size: 13px;
+  font-family: inherit;
+}

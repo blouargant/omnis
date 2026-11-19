@@ -306,6 +306,12 @@
               <div class="pane-picker-collection-menu" role="menu" hidden></div>
             </div>
           </div>
+          <div class="pane-picker-collection pane-picker-perm">
+            <span class="pane-picker-collection-label" data-i18n="picker.permissions">Permissions</span>
+            <div class="pane-picker-collection-control">
+              <select class="pane-picker-perm-select" aria-label="Permission mode for the new chat" data-i18n-aria-label="picker.permissionsAria"></select>
+            </div>
+          </div>
           <div class="pane-picker-dir" hidden></div>
           <button type="button" class="provider-warn-banner is-picker" hidden data-tip="Model connection problem — click to fix" data-i18n-tip="provider.warn">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -535,14 +541,14 @@
 
   <!-- i18n: the catalogue bundle + runtime load (deferred, in document order)
        BEFORE app.js/settings.js, so tr() and I18N exist when those render. -->
-  <script src="assets/i18n/locales.js?v=106" defer></script>
+  <script src="assets/i18n/locales.js?v=107" defer></script>
   <script src="assets/i18n.js?v=2" defer></script>
   <script src="assets/composer-state.js?v=1" defer></script>
   <script src="assets/perm-mode.js?v=1" defer></script>
   <script src="assets/memory-ui.js?v=3" defer></script>
   <script src="assets/tool-summary.js?v=2" defer></script>
   <script src="assets/env-panel.js?v=6" defer></script>
-  <script src="assets/app.js?v=149" defer></script>
+  <script src="assets/app.js?v=150" defer></script>
   <script src="assets/settings.js?v=73" defer></script>
 </body>
 </html>

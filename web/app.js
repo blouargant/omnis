@@ -272,7 +272,8 @@ function bindPaneEls(root) {
   e.pickerSquadToggle = root.querySelector(".pane-picker-squad-toggle");
   e.pickerSquadName   = root.querySelector(".pane-picker-squad-name");
   e.pickerSquadMenu   = root.querySelector(".pane-picker-squad-menu");
-  e.pickerCollection       = root.querySelector(".pane-picker-collection");
+  e.pickerPerm = root.querySelector(".pane-picker-perm-select");
+  e.pickerCollection       = root.querySelector(".pane-picker-collection:not(.pane-picker-perm)");
   e.pickerCollectionToggle = root.querySelector(".pane-picker-collection-toggle");
   e.pickerCollectionName   = root.querySelector(".pane-picker-collection-name");
   e.pickerCollectionGlyph  = root.querySelector(".pane-picker-collection-glyph");
@@ -964,6 +965,7 @@ function wirePaneSearch(panel) {
 function renderPanePicker(panel) {
   renderPickerSquad(panel);
   renderPickerCollection(panel);
+  renderPickerPerm(panel);
   // A draft opened from Files → "Open Chat here" starts in that folder.
   const dir = isDraft(panel.activeTab) ? draftDirs.get(panel.activeTab) : "";
   if (panel.els.pickerDir) {
@@ -3771,6 +3773,32 @@ function permModeInfo(panel) {
   }
   if (panel.sessionId && sessionPermMode.has(panel.sessionId)) return sessionPermMode.get(panel.sessionId);
   return null;
+}
+
+// renderPickerPerm fills the draft picker's Permissions selector; it reads and
+// writes draftPermModes[draftKey] (sent by newChat).
+function renderPickerPerm(panel) {
+  const sel = panel.els.pickerPerm;
+  if (!sel) return;
+  const key = panel.activeTab;
+  if (!key || !isDraft(key)) return;
+  const PM = window.PermMode;
+  const cur = draftPermModes.get(key) || "";
+  sel.innerHTML = "";
+  const add = (value, text) => {
+    const o = document.createElement("option");
+    o.value = value; o.textContent = text; o.selected = value === cur;
+    sel.appendChild(o);
+  };
+  add("", tr("permmode.follow", { mode: lastPermConfig.config_mode }));
+  for (const m of PM.MODES) {
+    if (m === "bypassPermissions" && lastPermConfig.bypass_disabled) continue;
+    add(m, `${m} — ${tr(PM.modeLabelKey(m))}`);
+  }
+  sel.onchange = () => {
+    if (sel.value) draftPermModes.set(key, sel.value); else draftPermModes.delete(key);
+    renderPermPastille(panel);
+  };
 }
 
 function renderPermPastille(panel) {
@@ -9414,6 +9442,7 @@ function forgetSession(id) {
   unsubscribeSessionEvents(id);
   dropRevealedRow(id);
   sessionMeta.delete(id);
+  sessionPermMode.delete(id);
   sessionTurnCounts.delete(id);
   sessionContainers.delete(id);
   sessionCtxUsage.delete(id);
@@ -10178,9 +10207,11 @@ async function subscribeGlobalEvents() {
           if (moved) moved.collection = (data && data.collection) || "";
           if (window.EnvPanel) EnvPanel.refresh("memory");
         } else if (event === "permission_mode_changed" && sid) {
-          const cur = sessionPermMode.get(sid) || {};
-          sessionPermMode.set(sid, { ...cur, mode: (data && data.mode) || "", effective: (data && data.effective) || cur.effective || "default" });
-          for (const p of panelsForSession(sid)) renderPermPastille(p);
+          const cur = sessionPermMode.get(sid);
+          if (!cur) { refreshPermMode(sid); } else {
+            sessionPermMode.set(sid, { ...cur, mode: (data && data.mode) || "", effective: (data && data.effective) || cur.effective || "default" });
+            for (const p of panelsForSession(sid)) renderPermPastille(p);
+          }
         } else if (event === "session_rewound" && sid) {
           clearSuggestion(sid);
           refreshSkills(sid);
