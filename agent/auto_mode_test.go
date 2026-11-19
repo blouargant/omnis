@@ -163,3 +163,15 @@ func TestBuildAutoRequestFencesUntrustedText(t *testing.T) {
 		t.Errorf("system prompt does not explain fences:\n%s", sys)
 	}
 }
+
+// The 2026-11-19 bench (omnis-benches reports/permission-mode-auto-2026-11-19.md)
+// had the judge refuse `git log` and a `vet` before a build as "not requested".
+// The prompt must keep telling it that steps toward the request are allowed and
+// that it judges effects, not literal match.
+func TestAutoSystemPromptAllowsIntermediateSteps(t *testing.T) {
+	for _, want := range []string{"EFFECTS", "intermediate steps", "inspecting git history", "outside the working directory"} {
+		if !strings.Contains(autoSystemPrompt, want) {
+			t.Errorf("autoSystemPrompt lost %q", want)
+		}
+	}
+}
