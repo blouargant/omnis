@@ -1,7 +1,6 @@
 package permissions
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -86,8 +85,5 @@ func ImportClaudeSettings(data []byte) (*Config, []string, error) {
 	check("ask", cfg.Permissions.Ask)
 	check("allow", cfg.Permissions.Allow)
 
-	if cfg.Permissions.DefaultMode == ModeAuto {
-		warnings = append(warnings, fmt.Sprintf("defaultMode %q is treated like %q (no background classifier).", "auto", "default"))
-	}
 	return cfg, warnings, nil
 }

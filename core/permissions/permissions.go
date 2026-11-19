@@ -81,6 +81,16 @@ func ParseMode(s string) Mode {
 	return ModeDefault
 }
 
+// ParseModeStrict is ParseMode that reports whether s names a known mode.
+func ParseModeStrict(s string) (Mode, bool) {
+	for m, name := range modeNames {
+		if strings.EqualFold(name, s) {
+			return m, true
+		}
+	}
+	return ModeDefault, false
+}
+
 func (m Mode) String() string { return modeNames[m] }
 
 func (m Mode) MarshalJSON() ([]byte, error) { return json.Marshal(m.String()) }
@@ -301,16 +311,22 @@ func (c *Config) CheckArgs(toolName string, args map[string]any, cwd string) (De
 // still checked too so a deny or explicit ask written against its full
 // arguments (a regex rule) keeps applying.
 func (c *Config) CheckArgsVerdict(toolName string, args map[string]any, cwd string) Verdict {
-	if toolName == "MultiEdit" {
-		if files, ok := args["files"].([]any); ok && len(files) > 0 {
-			return c.checkMultiEdit(files, args, cwd)
-		}
-	}
-	return c.checkArgsVerdict(toolName, args, cwd)
+	return c.CheckArgsVerdictMode(toolName, args, cwd, c.Permissions.DefaultMode)
 }
 
-func (c *Config) checkMultiEdit(files []any, args map[string]any, cwd string) Verdict {
-	whole := c.checkArgsVerdict("MultiEdit", args, cwd)
+// CheckArgsVerdictMode is CheckArgsVerdict under an explicit mode (a session's
+// effective mode) instead of the configured defaultMode.
+func (c *Config) CheckArgsVerdictMode(toolName string, args map[string]any, cwd string, mode Mode) Verdict {
+	if toolName == "MultiEdit" {
+		if files, ok := args["files"].([]any); ok && len(files) > 0 {
+			return c.checkMultiEdit(files, args, cwd, mode)
+		}
+	}
+	return c.checkArgsVerdict(toolName, args, cwd, mode)
+}
+
+func (c *Config) checkMultiEdit(files []any, args map[string]any, cwd string, mode Mode) Verdict {
+	whole := c.checkArgsVerdict("MultiEdit", args, cwd, mode)
 	if whole.Decision == DecisionDeny {
 		return whole
 	}
@@ -325,7 +341,7 @@ func (c *Config) checkMultiEdit(files []any, args map[string]any, cwd string) Ve
 			continue
 		}
 		one := map[string]any{"file_path": fm["file_path"], "edits": fm["edits"]}
-		v := c.checkArgsVerdict("MultiEdit", one, cwd)
+		v := c.checkArgsVerdict("MultiEdit", one, cwd, mode)
 		switch v.Decision {
 		case DecisionDeny:
 			return v
@@ -355,7 +371,7 @@ func (c *Config) checkMultiEdit(files []any, args map[string]any, cwd string) Ve
 	return whole
 }
 
-func (c *Config) checkArgsVerdict(toolName string, args map[string]any, cwd string) Verdict {
+func (c *Config) checkArgsVerdict(toolName string, args map[string]any, cwd string, mode Mode) Verdict {
 	ps := &c.Permissions
 	// bash_background and monitor run shell commands exactly like Bash (same
 	// "command" arg), so they are governed by the same Bash(...) allow/ask/deny
@@ -393,7 +409,6 @@ func (c *Config) checkArgsVerdict(toolName string, args map[string]any, cwd stri
 	if ctx.filePath == "" && toolName == "Grep" {
 		ctx.filePath = stringArg(args, "path")
 	}
-	mode := ps.DefaultMode
 
 	// 1. Explicit deny always wins.
 	if rl, ok := firstMatch(ps.Deny, ctx); ok {
@@ -426,7 +441,7 @@ func (c *Config) checkArgsVerdict(toolName string, args map[string]any, cwd stri
 		return Verdict{Decision: DecisionAllow, Reason: "read-only command"}
 	}
 	// 6. acceptEdits auto-allows edits in the working dir + common fs commands.
-	if mode == ModeAcceptEdits {
+	if mode == ModeAcceptEdits || mode == ModeAuto {
 		if isEditTool(toolName) && underWorkingDir(ctx.filePath, cwd, ps) {
 			return Verdict{Decision: DecisionAllow, Reason: "acceptEdits mode"}
 		}
@@ -1027,4 +1042,23 @@ func NewGate(cfg PluginConfig) (*Gate, error) {
 		return nil, err
 	}
 	return &Gate{Plugin: p, Callback: callback, Cleaner: cache}, nil
+}
+
+// ReadBypassDisabled reports whether the permissions file at path sets
+// permissions.disableBypassPermissionsMode to "disable". Missing or
+// unparseable files report false.
+func ReadBypassDisabled(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var raw struct {
+		Permissions struct {
+			Disable string `json:"disableBypassPermissionsMode"`
+		} `json:"permissions"`
+	}
+	if json.Unmarshal(data, &raw) != nil {
+		return false
+	}
+	return raw.Permissions.Disable == "disable"
 }
