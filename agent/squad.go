@@ -240,7 +240,10 @@ func buildSquadInstance(
 	// asked/denied identically and share the leader's approval cache. Built before
 	// the sub-agents because buildSubAgentsFromConfigs needs the callback.
 	asker := NewAskUserPermissionAsker(infra.AskUserRegistry)
-	permGate, permGateClose, err := buildPermissionGate(runtime, asker, infra.Bus, infra.HookClearances, infra.PermModes, newAutoJudge(runtime, rootCfg))
+	// One auto-mode judge per squad, shared by the gate and the hook asks.
+	autoJudge := newAutoJudge(runtime, rootCfg)
+	hookPerm := hookPermDeps{Modes: infra.PermModes, Judge: autoJudge}
+	permGate, permGateClose, err := buildPermissionGate(runtime, asker, infra.Bus, infra.HookClearances, infra.PermModes, autoJudge)
 	if err != nil {
 		for _, h := range allMCPHandles {
 			infra.MCPPool.Release(h)
@@ -255,7 +258,7 @@ func buildSquadInstance(
 	// (before the sub-agents) from the process-wide hooks engine; nil for the
 	// router squad. UserPromptSubmit/Stop stay leader-only (see hookToolCallbacks).
 	hooksEngine := infra.Hooks(runtime)
-	hooksBeforeTool, hooksAfterTool := hookToolCallbacks(hooksEngine, infra.AskUserRegistry, infra.HookState, infra.Attest, infra.HookClearances, pluginAgentTypes(runtime), isRouter)
+	hooksBeforeTool, hooksAfterTool := hookToolCallbacks(hooksEngine, infra.AskUserRegistry, infra.HookState, infra.Attest, infra.HookClearances, pluginAgentTypes(runtime), isRouter, hookPerm)
 
 	// ── Per-turn spend ceiling, shared like the gate ──
 	// Same two-place wiring, for the same reason: the plugin (buildPlugins) counts
@@ -420,7 +423,7 @@ func buildSquadInstance(
 	// the root's runner plugin; buildHooksPlugin reads the same hooksEngine).
 	suffix := func(u, s string) string { return infra.SessionSuffix(u, s) }
 	isRouterSquad := runtime.RouterSquad != "" && squad.Name == runtime.RouterSquad
-	plugins, pluginCloser, err := buildPlugins(infra, runtime, opts, orchestratorLLM, suffix, permGate.Plugin, hooksEngine, infra.SteerStore, infra.LSP(), isRouterSquad, budgetBeforeTool, budgetAfterModel, timeNoteBeforeModel, rootCfg)
+	plugins, pluginCloser, err := buildPlugins(infra, runtime, opts, orchestratorLLM, suffix, permGate.Plugin, hooksEngine, infra.SteerStore, infra.LSP(), isRouterSquad, budgetBeforeTool, budgetAfterModel, timeNoteBeforeModel, rootCfg, hookPerm)
 	if err != nil {
 		permGateClose()
 		for _, h := range allMCPHandles {

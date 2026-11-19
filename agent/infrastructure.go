@@ -21,6 +21,7 @@ import (
 	"github.com/blouargant/omnis/internal/budget"
 	"github.com/blouargant/omnis/internal/configedit"
 	"github.com/blouargant/omnis/internal/goal"
+	"github.com/blouargant/omnis/internal/hooks"
 	"github.com/blouargant/omnis/internal/hookstate"
 	"github.com/blouargant/omnis/internal/lsp"
 	mcpcfg "github.com/blouargant/omnis/internal/mcp"
@@ -265,7 +266,7 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 
 	permModes := permissions.NewModeStore()
 	permModes.SetBypassDisabled(permissions.ReadBypassDisabled(filepath.Join(paths.SystemConfigDir, "permissions.json")))
-	return &Infrastructure{
+	infra := &Infrastructure{
 		AppName:         appName,
 		Repo:            repo,
 		BuildTimestamp:  buildTimestamp,
@@ -287,7 +288,20 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 		MCPPool:         mcpcfg.NewPool(mcpcfg.NewInputResolver(askUserReg)),
 		RouteDirectives: NewRouteRegistry(),
 		SpawnDirectives: NewSpawnRegistry(),
-	}, nil
+	}
+	// Hooks report the session's permission mode on stdin.
+	hooks.SetPermissionModeResolver(func(sid string) string { return infra.PermissionModeFor(sid) })
+	return infra, nil
+}
+
+// PermissionModeFor reports a session's effective permission mode in Claude
+// Code's spelling ("default", "acceptEdits", "plan", "auto", "dontAsk",
+// "bypassPermissions").
+func (i *Infrastructure) PermissionModeFor(sessionID string) string {
+	if i == nil {
+		return permissions.ModeDefault.String()
+	}
+	return i.PermModes.Effective(sessionID).String()
 }
 
 // SessionSuffix returns the deterministic per-session filename suffix used

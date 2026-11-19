@@ -56,6 +56,7 @@ func buildPlugins(
 	budgetAfterModel llmagent.AfterModelCallback,
 	timeNoteBeforeModel llmagent.BeforeModelCallback,
 	rootCfg RuntimeAgentConfig,
+	hookPerm hookPermDeps,
 ) (plugins []*plugin.Plugin, closer func() error, err error) {
 	bus := infra.Bus
 	// Process-wide, opened + subscribed exactly once however many squads and
@@ -86,7 +87,7 @@ func buildPlugins(
 	// already approved the call. Keep these two in this order: a hook allow (or
 	// an approved hook ask) hands the gate a per-call clearance that skips only
 	// its mode-default prompt — see that comment.
-	if hp, herr := buildHooksPlugin(hooksEngine, infra.AskUserRegistry, infra.HookState, infra.Attest, infra.HookClearances, pluginAgentTypes(runtime), isRouterSquad); herr == nil && hp != nil {
+	if hp, herr := buildHooksPlugin(hooksEngine, infra.AskUserRegistry, infra.HookState, infra.Attest, infra.HookClearances, pluginAgentTypes(runtime), isRouterSquad, hookPerm); herr == nil && hp != nil {
 		plugins = append(plugins, hp)
 	}
 	// The permission gate is built once per squad by the caller (so the same

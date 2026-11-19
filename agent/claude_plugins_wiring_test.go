@@ -83,7 +83,7 @@ func newWiringRig(t *testing.T, decision, agentsJSON string, mutate func(*Runtim
 	infra := &Infrastructure{Bus: events.NewBus(), HookState: hookstate.New(), HookClearances: permissions.NewClearances()}
 	r.engine = infra.Hooks(rt)
 	infra.installPluginHooks(&Instance{Settings: rt})
-	before, _ := hookToolCallbacks(r.engine, r.reg, infra.HookState, nil, infra.HookClearances, pluginAgentTypes(rt), false)
+	before, _ := hookToolCallbacks(r.engine, r.reg, infra.HookState, nil, infra.HookClearances, pluginAgentTypes(rt), false, hookPermDeps{})
 	gate, closeGate, err := buildPermissionGate(rt, r.asker, infra.Bus, infra.HookClearances, nil, nil)
 	if err != nil {
 		t.Fatal(err)

@@ -19,6 +19,9 @@ type Input struct {
 	TranscriptPath string `json:"transcript_path,omitempty"`
 	Cwd            string `json:"cwd,omitempty"`
 	HookEventName  string `json:"hook_event_name"`
+	// PermissionMode is the session's permission mode (Claude Code spelling),
+	// filled by Config.Run from the process-wide resolver when empty.
+	PermissionMode string `json:"permission_mode,omitempty"`
 
 	// Tool events (PreToolUse / PostToolUse).
 	ToolName     string         `json:"tool_name,omitempty"`
@@ -149,6 +152,9 @@ func (c *Config) Run(ctx context.Context, event, subject string, in Input, cwd s
 	in.HookEventName = event
 	if in.Cwd == "" {
 		in.Cwd = cwd
+	}
+	if in.PermissionMode == "" {
+		in.PermissionMode = resolvePermissionMode(in.SessionID)
 	}
 	stdinNative, err := json.Marshal(in)
 	if err != nil {

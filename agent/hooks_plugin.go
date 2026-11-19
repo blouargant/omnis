@@ -105,12 +105,12 @@ func (i *Infrastructure) installPluginHooks(inst *Instance) {
 // routes (it runs no real tools and the user turn it sees is a clean router
 // view), so UserPromptSubmit / tool hooks must fire on the answering squad, not
 // the router hop. Returns (nil, nil) for the router so the caller mounts nothing.
-func buildHooksPlugin(engine *hooks.Reloader, reg *askuser.Registry, state *hookstate.Store, attestStore *attest.Store, clearances *permissions.Clearances, agentType func(agentName string) string, isRouter bool) (*plugin.Plugin, error) {
+func buildHooksPlugin(engine *hooks.Reloader, reg *askuser.Registry, state *hookstate.Store, attestStore *attest.Store, clearances *permissions.Clearances, agentType func(agentName string) string, isRouter bool, perm hookPermDeps) (*plugin.Plugin, error) {
 	if engine == nil || isRouter {
 		return nil, nil
 	}
 
-	beforeTool, afterTool := hookToolCallbacks(engine, reg, state, attestStore, clearances, agentType, isRouter)
+	beforeTool, afterTool := hookToolCallbacks(engine, reg, state, attestStore, clearances, agentType, isRouter, perm)
 
 	onUserMsg := func(ctx adk.InvocationContext, msg *genai.Content) (*genai.Content, error) {
 		cfg := engine.Snapshot()
@@ -176,7 +176,7 @@ func buildHooksPlugin(engine *hooks.Reloader, reg *askuser.Registry, state *hook
 // not the user turn), and a sub-agent's completion is already covered by the
 // SubagentStop bus hook — firing Stop on it would misfire the "main agent
 // finished" hook.
-func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hookstate.Store, attestStore *attest.Store, clearances *permissions.Clearances, agentType func(agentName string) string, isRouter bool) (llmagent.BeforeToolCallback, llmagent.AfterToolCallback) {
+func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hookstate.Store, attestStore *attest.Store, clearances *permissions.Clearances, agentType func(agentName string) string, isRouter bool, perm hookPermDeps) (llmagent.BeforeToolCallback, llmagent.AfterToolCallback) {
 	if engine == nil || isRouter {
 		return nil, nil
 	}
@@ -215,6 +215,31 @@ func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hoo
 			reason := out.Reason
 			if reason == "" {
 				reason = "a PreToolUse hook asked for confirmation"
+			}
+			// The session's permission mode answers the ask before the user is
+			// bothered. A hook deny/block never reaches here — it blocks in
+			// every mode.
+			switch mode := perm.Modes.Effective(sid); {
+			case mode == permissions.ModeBypass:
+				state.RecordOutcome(sid, t.Name(), false)
+				grant()
+				return nil, nil
+			case mode == permissions.ModeDontAsk:
+				state.RecordOutcome(sid, t.Name(), true)
+				return map[string]any{
+					"output": fmt.Sprintf("[BLOCKED BY HOOK] %s: dontAsk mode: the hook asked for confirmation", t.Name()),
+				}, nil
+			case mode == permissions.ModeAuto && perm.Judge != nil:
+				if v, jerr := perm.Judge(tc, t.Name(), args, cwd, reason); jerr == nil {
+					if v.Allow {
+						state.RecordOutcome(sid, t.Name(), false)
+						grant()
+						return nil, nil
+					}
+					state.RecordOutcome(sid, t.Name(), true)
+					return map[string]any{"output": permissions.AutoBlockMessage(t.Name(), v.Reason)}, nil
+				}
+				// Could not judge: fall through to asking the user.
 			}
 			// An escalation nobody can answer is not an escalation, it is a
 			// hang: askHookPermission would block on a card no one will ever
@@ -438,4 +463,12 @@ func strFromPayload(p map[string]any, key string) string {
 		return v
 	}
 	return ""
+}
+
+// hookPermDeps carries the session permission mode and the auto-mode judge to
+// the PreToolUse callbacks, so a hook's `ask` follows the session's mode. Zero
+// value = every ask goes to the user (the pre-mode behaviour).
+type hookPermDeps struct {
+	Modes *permissions.ModeStore
+	Judge permissions.AutoJudge
 }
