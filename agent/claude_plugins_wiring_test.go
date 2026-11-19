@@ -84,7 +84,7 @@ func newWiringRig(t *testing.T, decision, agentsJSON string, mutate func(*Runtim
 	r.engine = infra.Hooks(rt)
 	infra.installPluginHooks(&Instance{Settings: rt})
 	before, _ := hookToolCallbacks(r.engine, r.reg, infra.HookState, nil, infra.HookClearances, pluginAgentTypes(rt), false)
-	gate, closeGate, err := buildPermissionGate(rt, r.asker, infra.Bus, infra.HookClearances)
+	gate, closeGate, err := buildPermissionGate(rt, r.asker, infra.Bus, infra.HookClearances, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

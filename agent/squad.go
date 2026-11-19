@@ -240,7 +240,7 @@ func buildSquadInstance(
 	// asked/denied identically and share the leader's approval cache. Built before
 	// the sub-agents because buildSubAgentsFromConfigs needs the callback.
 	asker := NewAskUserPermissionAsker(infra.AskUserRegistry)
-	permGate, permGateClose, err := buildPermissionGate(runtime, asker, infra.Bus, infra.HookClearances)
+	permGate, permGateClose, err := buildPermissionGate(runtime, asker, infra.Bus, infra.HookClearances, infra.PermModes, newAutoJudge(runtime, rootCfg))
 	if err != nil {
 		for _, h := range allMCPHandles {
 			infra.MCPPool.Release(h)

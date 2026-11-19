@@ -14,6 +14,7 @@ import (
 	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/core/permissions"
 	fstools "github.com/blouargant/omnis/core/tools"
+	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/cache"
 	"github.com/blouargant/omnis/internal/compress"
 	"github.com/blouargant/omnis/internal/hooks"
@@ -203,7 +204,7 @@ func (c RuntimeAgentConfig) CompressionReserve() int {
 // (buildSquadInstance) runs the cleanup on generation teardown. Building the
 // gate here — once per squad — is what lets the SAME approval cache/asker cover
 // both the leader and its sub-agents.
-func buildPermissionGate(runtime RuntimeSettings, asker permissions.Asker, bus *events.Bus, clearances *permissions.Clearances) (*permissions.Gate, func(), error) {
+func buildPermissionGate(runtime RuntimeSettings, asker permissions.Asker, bus *events.Bus, clearances *permissions.Clearances, modes *permissions.ModeStore, judge permissions.AutoJudge) (*permissions.Gate, func(), error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	// Skill overlays (in-memory; do not need to be polled).
 	// Merge across every layer of the skills search chain so overlays from
@@ -263,6 +264,7 @@ func buildPermissionGate(runtime RuntimeSettings, asker permissions.Asker, bus *
 
 	reloader := permissions.NewReloader(basePath, overlayPaths, skillOverlays)
 	reloader.Start(ctx)
+	modes.SetConfigSource(reloader)
 
 	// Where "Allow always" / "Allow in this project" persistence lands (the
 	// layer-aware user/local write target). It is already among the watched
@@ -297,10 +299,13 @@ func buildPermissionGate(runtime RuntimeSettings, asker permissions.Asker, bus *
 		// It is the SAME resolver the hook callback grants clearances under
 		// (realSessionID), so both sides key identically — including a sub-agent
 		// in an injected turn, where only events.WithRootSession is planted.
-		SessionFunc:  realSessionID,
-		Clearances:   clearances,
-		DefaultAllow: samePluginDelegation(runtime),
-		Debug:        os.Getenv("OMNIS_DEBUG") != "",
+		SessionFunc:    realSessionID,
+		Clearances:     clearances,
+		Modes:          modes,
+		AutoJudge:      judge,
+		NonInteractive: askuser.NonInteractive,
+		DefaultAllow:   samePluginDelegation(runtime),
+		Debug:          os.Getenv("OMNIS_DEBUG") != "",
 	})
 	if err != nil {
 		cancel()

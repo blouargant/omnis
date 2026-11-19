@@ -106,6 +106,9 @@ type Infrastructure struct {
 	// the permission gate for the same call (see permissions.Clearances).
 	HookClearances *permissions.Clearances
 
+	// PermModes holds per-session permission modes and auto-mode counters.
+	PermModes *permissions.ModeStore
+
 	// Attest holds per-session reviewer verdicts (see internal/attest).
 	// Process-wide so it survives a hot-reload; lost on restart, which forces a
 	// re-review — the correct fail-closed direction.
@@ -260,6 +263,8 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 		return filepath.Join(paths.LogsDir(), fmt.Sprintf("agent_todo_%s.json", suffix(u, s)))
 	})
 
+	permModes := permissions.NewModeStore()
+	permModes.SetBypassDisabled(permissions.ReadBypassDisabled(filepath.Join(paths.SystemConfigDir, "permissions.json")))
 	return &Infrastructure{
 		AppName:         appName,
 		Repo:            repo,
@@ -277,6 +282,7 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 		Budget:          budget.New(),
 		HookState:       hookstate.New(),
 		HookClearances:  permissions.NewClearances(),
+		PermModes:       permModes,
 		Attest:          attest.New(),
 		MCPPool:         mcpcfg.NewPool(mcpcfg.NewInputResolver(askUserReg)),
 		RouteDirectives: NewRouteRegistry(),

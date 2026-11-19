@@ -7,7 +7,11 @@ package agent
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sync"
+
+	"github.com/blouargant/omnis/core/permissions"
+	"github.com/blouargant/omnis/internal/paths"
 )
 
 // Manager owns the shared Infrastructure and the set of agent Instances that
@@ -305,6 +309,7 @@ func (m *Manager) Reload(ctx context.Context, opts Options) (*Instance, error) {
 	nextGen := m.genSeq
 	m.mu.Unlock()
 
+	m.infra.PermModes.SetBypassDisabled(permissions.ReadBypassDisabled(filepath.Join(paths.SystemConfigDir, "permissions.json")))
 	inst, err := BuildInstance(ctx, m.infra, opts, nextGen)
 	if err != nil {
 		return nil, fmt.Errorf("reload: %w", err)
