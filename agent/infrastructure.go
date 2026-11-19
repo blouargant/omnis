@@ -265,7 +265,7 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 	})
 
 	permModes := permissions.NewModeStore()
-	permModes.SetBypassDisabled(permissions.ReadBypassDisabled(filepath.Join(paths.SystemConfigDir, "permissions.json")))
+	permModes.SetBypassDisabled(permissions.ReadBypassDisabled(filepath.Join(paths.SystemDir(), "permissions.json")))
 	infra := &Infrastructure{
 		AppName:         appName,
 		Repo:            repo,

@@ -309,7 +309,7 @@ func (m *Manager) Reload(ctx context.Context, opts Options) (*Instance, error) {
 	nextGen := m.genSeq
 	m.mu.Unlock()
 
-	m.infra.PermModes.SetBypassDisabled(permissions.ReadBypassDisabled(filepath.Join(paths.SystemConfigDir, "permissions.json")))
+	m.infra.PermModes.SetBypassDisabled(permissions.ReadBypassDisabled(filepath.Join(paths.SystemDir(), "permissions.json")))
 	inst, err := BuildInstance(ctx, m.infra, opts, nextGen)
 	if err != nil {
 		return nil, fmt.Errorf("reload: %w", err)
