@@ -920,6 +920,7 @@ func newEngine(d serverDeps) *gin.Engine {
 	// /goal — set / inspect / clear a session completion goal. The agent keeps
 	// working across turns until the evaluator judges the condition met. See
 	// server/goal.go.
+	auth.GET("/permission-mode", handlePermissionModeConfig(d))
 	auth.GET("/sessions/:id/permission-mode", handlePermissionModeGet(d))
 	auth.PUT("/sessions/:id/permission-mode", handlePermissionModeSet(d))
 	auth.GET("/sessions/:id/goal", handleGoalStatus(d))

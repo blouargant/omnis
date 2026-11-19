@@ -282,3 +282,15 @@ func TestCreateSessionWhitespaceModeIsEmpty(t *testing.T) {
 		t.Fatal("whitespace mode installed an override")
 	}
 }
+
+func TestPermissionModeConfigRoute(t *testing.T) {
+	f := newPMFixture(t)
+	f.modes.SetBypassDisabled(true)
+	got := decodePM(t, f.do(http.MethodGet, "/api/permission-mode", ""))
+	if got["config_mode"] == nil || got["bypass_disabled"] != true {
+		t.Fatalf("payload: %v", got)
+	}
+	if got["config_mode"] != f.modes.ConfigMode().String() {
+		t.Fatalf("config_mode %v", got["config_mode"])
+	}
+}

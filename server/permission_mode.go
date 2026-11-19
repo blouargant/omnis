@@ -68,6 +68,17 @@ func permissionModePayload(d serverDeps, id string) gin.H {
 	}
 }
 
+// handlePermissionModeConfig answers the session-less config facts a draft
+// needs: the configured default mode and whether bypassPermissions is disabled.
+func handlePermissionModeConfig(d serverDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"config_mode":     d.PermModes.ConfigMode().String(),
+			"bypass_disabled": d.PermModes.BypassDisabled(),
+		})
+	}
+}
+
 func handlePermissionModeGet(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")

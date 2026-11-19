@@ -3801,6 +3801,19 @@ function renderPickerPerm(panel) {
   };
 }
 
+// refreshPermConfig seeds lastPermConfig (config default + bypass policy) with
+// no session, so drafts show the right defaults before any session loads.
+async function refreshPermConfig() {
+  try {
+    const res = await apiFetch("/api/permission-mode");
+    if (!res.ok) return;
+    const d = await res.json();
+    lastPermConfig = { config_mode: d.config_mode || "default", bypass_disabled: !!d.bypass_disabled };
+    for (const p of panels) { renderPermPastille(p); if (p.activeTab && isDraft(p.activeTab)) renderPickerPerm(p); }
+  } catch (_) { /* keep defaults */ }
+}
+window.addEventListener("omnis:config-reloaded", refreshPermConfig);
+
 function renderPermPastille(panel) {
   const btn = panel && panel.els.permModeBtn;
   if (!btn) return;
@@ -15784,6 +15797,7 @@ async function restoreLayout(rec, liveIds) {
   const updateBtn = document.getElementById("update-btn");
   if (updateBtn) updateBtn.addEventListener("click", openUpdateDialog);
   checkForUpdate(); // fire-and-forget
+  refreshPermConfig();
   // Wire the collections rail's "+ New" button and load the collection list
   // BEFORE sessions so the very first render already knows which collection each
   // session belongs to (no fold-to-General flash for filed sessions).
