@@ -13,6 +13,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"github.com/blouargant/omnis/core/permissions"
 	"sort"
 	"strings"
 
@@ -66,6 +67,11 @@ type SquadInstance struct {
 
 	LeaderCfg                  RuntimeAgentConfig
 	LeaderAllowFileAttachments bool
+
+	// PermSource is this squad's live permission rule source. The default
+	// squad's becomes the ModeStore's config source when the generation is
+	// installed (Infrastructure.installPluginHooks), never during a build.
+	PermSource permissions.Source
 }
 
 // squadBuildResult bundles the artefacts returned by buildSquadInstance so
@@ -478,6 +484,7 @@ func buildSquadInstance(
 		Runner:                     r,
 		LeaderCfg:                  rootCfg,
 		LeaderAllowFileAttachments: rootCfg.AllowFileAttachments,
+		PermSource:                 permGate.Source,
 	}
 	// Every agent that can be INVOKED as a sub-agent, not just the squad's direct
 	// members: a nested gatherer (reachable only through another agent's

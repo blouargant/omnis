@@ -77,8 +77,17 @@ func (i *Infrastructure) Hooks(runtime RuntimeSettings) *hooks.Reloader {
 // Manager.Reload after promoting a new one, NewAgent for the single-generation
 // surfaces), never during a build. Nil-safe; a no-op when the engine was never
 // built or the layers are unchanged.
+//
+// It also points the permission ModeStore's config source (the fallback mode
+// reported to hooks and the UI) at the installed generation's default squad.
 func (i *Infrastructure) installPluginHooks(inst *Instance) {
-	if i == nil || inst == nil || i.hooks.reloader == nil {
+	if i == nil || inst == nil {
+		return
+	}
+	if sq := inst.Squads[inst.DefaultName]; sq != nil && sq.PermSource != nil {
+		i.PermModes.SetConfigSource(sq.PermSource)
+	}
+	if i.hooks.reloader == nil {
 		return
 	}
 	i.hooks.reloader.SetPluginLayers(inst.Settings.PluginHookLayers)

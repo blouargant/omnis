@@ -447,12 +447,14 @@ func run() error {
 		if dir := strings.TrimSpace(meta.Cwd); dir != "" {
 			bashCwd.seed(meta.ID, dir)
 		}
-		// Restore an in-progress /goal (resume semantics): the condition carries
-		// over, the timer/turn count reset. The goal then re-engages on this
-		// session's next user turn (the producer loop evaluates it after the turn).
+		// Seed the session's permission-mode override (LoadPersistedSessions only
+		// maps the field; the live store is filled here).
 		if m, ok := permissions.ParseModeStrict(strings.TrimSpace(meta.PermissionMode)); ok && meta.PermissionMode != "" {
 			infra.PermModes.Set(meta.ID, m)
 		}
+		// Restore an in-progress /goal (resume semantics): the condition carries
+		// over, the timer/turn count reset. The goal then re-engages on this
+		// session's next user turn (the producer loop evaluates it after the turn).
 		if infra.GoalStore != nil && strings.TrimSpace(meta.Goal) != "" {
 			infra.GoalStore.Restore(meta.ID, meta.Goal)
 		}

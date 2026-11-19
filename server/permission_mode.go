@@ -33,8 +33,7 @@ func validatePermissionMode(d serverDeps, raw string) (permissions.Mode, *permMo
 }
 
 // applyPermissionMode installs the override in the live store and the
-// registry/conversation file. An empty mode (use applyPermissionModeString)
-// clears it.
+// registry/conversation file (clearPermissionMode removes it).
 func applyPermissionMode(d serverDeps, id string, m permissions.Mode) {
 	d.PermModes.Set(id, m)
 	d.Registry.SetPermissionMode(id, m.String())
@@ -63,7 +62,7 @@ func permissionModePayload(d serverDeps, id string) gin.H {
 	return gin.H{
 		"mode":            override,
 		"effective":       d.PermModes.Effective(id).String(),
-		"config_mode":     d.PermModes.ConfigMode().String(),
+		"config_mode":     d.PermModes.ConfigModeReported().String(),
 		"bypass_disabled": d.PermModes.BypassDisabled(),
 	}
 }
@@ -73,7 +72,7 @@ func permissionModePayload(d serverDeps, id string) gin.H {
 func handlePermissionModeConfig(d serverDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"config_mode":     d.PermModes.ConfigMode().String(),
+			"config_mode":     d.PermModes.ConfigModeReported().String(),
 			"bypass_disabled": d.PermModes.BypassDisabled(),
 		})
 	}

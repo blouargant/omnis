@@ -271,7 +271,9 @@ func buildPermissionGate(runtime RuntimeSettings, asker permissions.Asker, bus *
 
 	reloader := permissions.NewReloader(basePath, overlayPaths, skillOverlays)
 	reloader.Start(ctx)
-	modes.SetConfigSource(reloader)
+	// The ModeStore's config source is set when the generation is installed
+	// (installPluginHooks), not here: a generation that is built and then
+	// rejected must not leave the store reading its torn-down reloader.
 
 	// Where "Allow always" / "Allow in this project" persistence lands (the
 	// layer-aware user/local write target). It is already among the watched

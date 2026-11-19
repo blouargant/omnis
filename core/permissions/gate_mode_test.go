@@ -194,3 +194,38 @@ func TestGateClearanceBeforeJudge(t *testing.T) {
 		t.Errorf("out=%v judged=%d", out, judged)
 	}
 }
+
+// With no session override the gate follows its OWN live config, not the
+// ModeStore's shared source (which may belong to a torn-down generation).
+func TestGateNoOverrideUsesOwnConfigMode(t *testing.T) {
+	gateCfg := cfgFromJSON(t, `{"permissions":{"defaultMode":"plan"}}`)
+	stale := cfgFromJSON(t, `{"permissions":{"defaultMode":"default"}}`)
+	modes := NewModeStore()
+	modes.SetConfigSource(&Static{C: stale})
+	asker := &scriptAsker{outcome: OutcomeAllowOnce}
+	g, err := NewGate(PluginConfig{Source: &Static{C: gateCfg}, Asker: asker, Modes: modes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := gateCtx{Context: context.Background(), session: "s", callID: "a", inv: "i"}
+	out, _ := g.Callback(ctx, gateTool{name: "Edit"}, file("/x/c.go"))
+	if got := outStr(out); got != "[DENIED] Edit: plan mode forbids edits" {
+		t.Fatalf("want plan behaviour, got %q (asks=%d)", got, asker.n)
+	}
+}
+
+// EffectiveWith applies the bypass-disabled downgrade to the given config mode.
+func TestModeStoreEffectiveWith(t *testing.T) {
+	s := NewModeStore()
+	if got := s.EffectiveWith("s", ModePlan); got != ModePlan {
+		t.Fatalf("no override: %v", got)
+	}
+	s.SetBypassDisabled(true)
+	if got := s.EffectiveWith("s", ModeBypass); got != ModeDefault {
+		t.Fatalf("bypass disabled: %v", got)
+	}
+	s.Set("s", ModeAcceptEdits)
+	if got := s.EffectiveWith("s", ModePlan); got != ModeAcceptEdits {
+		t.Fatalf("override wins: %v", got)
+	}
+}

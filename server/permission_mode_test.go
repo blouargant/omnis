@@ -294,3 +294,21 @@ func TestPermissionModeConfigRoute(t *testing.T) {
 		t.Fatalf("config_mode %v", got["config_mode"])
 	}
 }
+
+// config_mode is reported as the mode that actually applies: a configured
+// bypassPermissions reads as default while the policy disables it.
+func TestPermissionModeConfigRouteReportsDowngradedBypass(t *testing.T) {
+	f := newPMFixture(t)
+	f.modes.SetConfigSource(&permissions.Static{C: &permissions.Config{Permissions: permissions.PermSet{DefaultMode: permissions.ModeBypass}}})
+	if got := decodePM(t, f.do(http.MethodGet, "/api/permission-mode", ""))["config_mode"]; got != "bypassPermissions" {
+		t.Fatalf("policy off: config_mode %v", got)
+	}
+	f.modes.SetBypassDisabled(true)
+	if got := decodePM(t, f.do(http.MethodGet, "/api/permission-mode", ""))["config_mode"]; got != "default" {
+		t.Fatalf("policy on: config_mode %v", got)
+	}
+	id := f.seed()
+	if got := decodePM(t, f.do(http.MethodGet, "/api/sessions/"+id+"/permission-mode", ""))["config_mode"]; got != "default" {
+		t.Fatalf("session route: config_mode %v", got)
+	}
+}

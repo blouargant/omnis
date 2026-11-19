@@ -931,6 +931,8 @@ type Gate struct {
 	Plugin   *plugin.Plugin
 	Callback llmagent.BeforeToolCallback
 	Cleaner  SessionCleaner
+	// Source is the gate's live rule source (cfg.Source).
+	Source Source
 }
 
 // NewPluginFromConfig wires the permissions plugin with live-reloadable rules,
@@ -983,7 +985,7 @@ func NewGate(cfg PluginConfig) (*Gate, error) {
 		snap := cfg.Source.Snapshot()
 		mode := snap.Permissions.DefaultMode
 		if cfg.Modes != nil {
-			mode = cfg.Modes.Effective(sid)
+			mode = cfg.Modes.EffectiveWith(sid, mode)
 		}
 		var v Verdict
 		haveVerdict := false
@@ -1098,7 +1100,7 @@ func NewGate(cfg PluginConfig) (*Gate, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Gate{Plugin: p, Callback: callback, Cleaner: cache}, nil
+	return &Gate{Plugin: p, Callback: callback, Cleaner: cache, Source: cfg.Source}, nil
 }
 
 // ReadBypassDisabled reports whether the permissions file at path sets

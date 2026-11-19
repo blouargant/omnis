@@ -108,10 +108,34 @@ func (s *ModeStore) Effective(sid string) Mode {
 	if s == nil {
 		return ModeDefault
 	}
+	return s.EffectiveWith(sid, s.ConfigMode())
+}
+
+// EffectiveWith is Effective with the caller's own configured mode as the
+// fallback (a gate passes its live snapshot's defaultMode, so it never follows
+// another generation's source). The bypass downgrade applies the same way.
+func (s *ModeStore) EffectiveWith(sid string, config Mode) Mode {
+	if s == nil {
+		return config
+	}
 	m, ok := s.Get(sid)
 	if !ok {
-		m = s.ConfigMode()
+		m = config
 	}
+	return s.downgrade(sid, m)
+}
+
+// ConfigModeReported is the configured mode as the UI should show it: bypass
+// reads as default when the policy disables it.
+func (s *ModeStore) ConfigModeReported() Mode {
+	m := s.ConfigMode()
+	if m == ModeBypass && s.BypassDisabled() {
+		return ModeDefault
+	}
+	return m
+}
+
+func (s *ModeStore) downgrade(sid string, m Mode) Mode {
 	if m == ModeBypass && s.bypassOff.Load() {
 		if _, seen := s.logged.LoadOrStore(sid, true); !seen {
 			log.Printf("permissions: bypassPermissions is disabled by policy; session %s runs in default mode", sid)
