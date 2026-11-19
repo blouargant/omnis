@@ -884,6 +884,14 @@ type PluginConfig struct {
 	// DefaultAllow, when set and true for a tool, likewise skips only the
 	// mode-default prompt (e.g. a plugin's own tools). Optional.
 	DefaultAllow func(tc adk.ToolContext, toolName string) bool
+	// Modes holds per-session permission-mode overrides. Nil ⇒ the snapshot's
+	// configured defaultMode applies to every session.
+	Modes *ModeStore
+	// AutoJudge classifies default-ask calls in auto mode. Nil ⇒ auto behaves
+	// like default (ask the user).
+	AutoJudge AutoJudge
+	// NonInteractive reports that nobody can answer a prompt. Nil ⇒ false.
+	NonInteractive func() bool
 }
 
 // SessionCleaner exposes the internal session-approval cache so the caller can
@@ -955,6 +963,9 @@ func NewGate(cfg PluginConfig) (*Gate, error) {
 	if cfg.SessionFunc == nil {
 		cfg.SessionFunc = func(tc adk.ToolContext) string { return tc.SessionID() }
 	}
+	if cfg.NonInteractive == nil {
+		cfg.NonInteractive = func() bool { return false }
+	}
 	cache := newSessionApprovalCache()
 	logf := func(format string, a ...any) {
 		if cfg.Debug {
@@ -969,6 +980,26 @@ func NewGate(cfg PluginConfig) (*Gate, error) {
 		sid := cfg.SessionFunc(tc)
 		cleared := cfg.Clearances.Take(sid, tc.InvocationID(), tc.FunctionCallID(), t.Name())
 
+		snap := cfg.Source.Snapshot()
+		mode := snap.Permissions.DefaultMode
+		if cfg.Modes != nil {
+			mode = cfg.Modes.Effective(sid)
+		}
+		var v Verdict
+		haveVerdict := false
+		if mode == ModePlan {
+			// Plan mode beats cached grants: a grant made earlier must not
+			// let an edit through once the session switched to plan.
+			v = snap.CheckArgsVerdictMode(t.Name(), args, cwd, mode)
+			haveVerdict = true
+			if v.Decision == DecisionDeny {
+				logf("DENY sid=%q tool=%s reason=%q", sid, t.Name(), v.Reason)
+				return map[string]any{
+					"output": fmt.Sprintf("[DENIED] %s: %s", t.Name(), v.Reason),
+				}, nil
+			}
+		}
+
 		if cache.hasTool(sid, t.Name()) {
 			logf("tool-grant hit sid=%q tool=%s", sid, t.Name())
 			return nil, nil
@@ -978,7 +1009,9 @@ func NewGate(cfg PluginConfig) (*Gate, error) {
 			return nil, nil
 		}
 
-		v := cfg.Source.Snapshot().CheckArgsVerdict(t.Name(), args, cwd)
+		if !haveVerdict {
+			v = snap.CheckArgsVerdictMode(t.Name(), args, cwd, mode)
+		}
 		decision, reason := v.Decision, v.Reason
 		if decision == DecisionAsk && v.DefaultAsk &&
 			(cleared || (cfg.DefaultAllow != nil && cfg.DefaultAllow(tc, t.Name()))) {
@@ -995,8 +1028,32 @@ func NewGate(cfg PluginConfig) (*Gate, error) {
 			logf("rule ALLOW sid=%q tool=%s reason=%q", sid, t.Name(), reason)
 			return nil, nil
 		case DecisionAsk:
+			if v.DefaultAsk && mode == ModeAuto && cfg.AutoJudge != nil {
+				nonInt := cfg.NonInteractive()
+				if nonInt || !cfg.Modes.AutoEscalated(sid) {
+					av, jerr := cfg.AutoJudge(tc, t.Name(), args, cwd, reason)
+					switch {
+					case jerr != nil:
+						logf("auto judge error sid=%q tool=%s: %v", sid, t.Name(), jerr)
+						if nonInt {
+							return map[string]any{
+								"output": fmt.Sprintf("[DENIED] %s: auto mode could not judge this call", t.Name()),
+							}, nil
+						}
+					case av.Allow:
+						cfg.Modes.AutoAllowed(sid)
+						logf("auto ALLOW sid=%q tool=%s", sid, t.Name())
+						return nil, nil
+					default:
+						cfg.Modes.AutoBlocked(sid)
+						logf("auto BLOCK sid=%q tool=%s reason=%q", sid, t.Name(), av.Reason)
+						return map[string]any{"output": AutoBlockMessage(t.Name(), av.Reason)}, nil
+					}
+				}
+			}
 			logf("ASK sid=%q tool=%s reason=%q", sid, t.Name(), reason)
 			outcome := cfg.Asker.Ask(tc, t.Name(), input, reason)
+			cfg.Modes.ResetAuto(sid)
 			switch outcome {
 			case OutcomeDeny:
 				logf("user DENY sid=%q tool=%s", sid, t.Name())
