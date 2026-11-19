@@ -90,6 +90,9 @@ type SessionMeta struct {
 	// "Pinned" section above the collections (and not in its collection's
 	// group). Persisted in the conversation file.
 	Pinned bool `json:"pinned,omitempty"`
+	// PermissionMode mirrors the conversation file's permission-mode override
+	// ("" = configured default).
+	PermissionMode string `json:"permission_mode,omitempty"`
 	// Goal is the session's active /goal completion condition, mirrored from the
 	// conversation file so the server can restore an in-progress goal on restart.
 	// Empty when no goal is active. The live goal state lives in the process-wide
@@ -347,6 +350,26 @@ func (r *Registry) SetPinned(id string, v bool) bool {
 	go func() {
 		if err := SetConversationPinned(id, v); err != nil {
 			log.Printf("sessions: failed to persist pinned flag for session %s: %v", id, err)
+		}
+	}()
+	return true
+}
+
+// SetPermissionMode sets (or clears, with "") the session's permission-mode
+// override (in-memory + persisted asynchronously). Returns true when found.
+func (r *Registry) SetPermissionMode(id, mode string) bool {
+	r.mu.Lock()
+	m, ok := r.items[id]
+	if ok {
+		m.PermissionMode = mode
+	}
+	r.mu.Unlock()
+	if !ok {
+		return false
+	}
+	go func() {
+		if err := SetConversationPermissionMode(id, mode); err != nil {
+			log.Printf("sessions: failed to persist permission mode for session %s: %v", id, err)
 		}
 	}()
 	return true

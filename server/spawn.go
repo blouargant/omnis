@@ -34,6 +34,7 @@ type spawnOptions struct {
 	Title        string // friendly session title (empty ⇒ keep the petname id)
 	Dir          string // working directory to inherit (empty ⇒ default root)
 	UserID       string // owning user (empty ⇒ sessions.UserID())
+	ParentID     string // session whose permission-mode override is inherited (may be empty)
 }
 
 // materializeSession creates a fresh, first-class session (fresh context) wired
@@ -65,6 +66,10 @@ func materializeSession(d serverDeps, o spawnOptions) *sessions.SessionMeta {
 		if info, err := os.Stat(dir); err == nil && info.IsDir() {
 			bashCwd.set(meta.ID, dir)
 		}
+	}
+
+	if o.ParentID != "" {
+		copyPermissionMode(d, o.ParentID, meta.ID)
 	}
 
 	title := strings.TrimSpace(o.Title)
@@ -251,6 +256,7 @@ func deleteSession(d serverDeps, id string) bool {
 	sessions.DeleteSessionLogs(userID, id)
 	deleteSessionUploads(id)
 	forgetSessionState(d, id)
+	d.PermModes.Forget(id)
 	if d.GoalStore != nil { // permanent removal only on delete (kept across archive)
 		d.GoalStore.Forget(id)
 	}
@@ -304,6 +310,7 @@ func drainSpawns(d serverDeps, parentID, parentUserID string) {
 			Title:        sd.Name,
 			Dir:          parentDir,
 			UserID:       parentUserID,
+			ParentID:     parentID,
 		})
 		if meta == nil {
 			continue
@@ -342,6 +349,7 @@ func handleSpawn(d serverDeps) gin.HandlerFunc {
 			Title:        strings.TrimSpace(req.Name),
 			Dir:          bashCwd.get(parentID),
 			UserID:       sessionUserID(parentMeta),
+			ParentID:     parentID,
 		})
 		if meta == nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not create session"})

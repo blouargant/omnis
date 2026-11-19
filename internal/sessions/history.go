@@ -154,6 +154,10 @@ type ConversationFile struct {
 	// Pinned marks a session pinned in the sidebar (see SessionMeta.Pinned).
 	// Not inherited by forks, not exported.
 	Pinned bool `json:"pinned,omitempty"`
+	// PermissionMode is the session's permission-mode override ("plan",
+	// "auto", ...); empty means the configured default. Inherited by forks,
+	// dropped on import.
+	PermissionMode string `json:"permission_mode,omitempty"`
 	// Goal is the session's active /goal completion condition, persisted so an
 	// in-progress goal is restored on a server restart (resume semantics: the
 	// condition carries over, the timer/turn count reset). Empty when no goal is
@@ -427,13 +431,14 @@ func ForkConversation(srcID, dstID, title string, keep int) ([]ConversationTurn,
 	}
 	kept := append([]ConversationTurn(nil), src.Turns[:keep]...)
 	dst := &ConversationFile{
-		Title:      title,
-		Squad:      src.Squad,
-		Collection: src.Collection, // fork stays in the source's collection
-		ParentID:   srcID,
-		Skills:     skillsBefore(src.Skills, keep),
-		Produced:   producedBefore(src.Produced, keep),
-		Turns:      kept,
+		Title:          title,
+		Squad:          src.Squad,
+		Collection:     src.Collection, // fork stays in the source's collection
+		PermissionMode: src.PermissionMode,
+		ParentID:       srcID,
+		Skills:         skillsBefore(src.Skills, keep),
+		Produced:       producedBefore(src.Produced, keep),
+		Turns:          kept,
 	}
 	if err := SaveConversationFile(dstID, dst); err != nil {
 		return nil, err
@@ -451,6 +456,12 @@ func SetConversationArchived(sessionID string, v bool) error {
 // turns.
 func SetConversationPinned(sessionID string, v bool) error {
 	return mutateConversation(sessionID, func(f *ConversationFile) { f.Pinned = v })
+}
+
+// SetConversationPermissionMode persists (or clears, when mode is empty) the
+// session's permission-mode override without touching turns.
+func SetConversationPermissionMode(sessionID, mode string) error {
+	return mutateConversation(sessionID, func(f *ConversationFile) { f.PermissionMode = mode })
 }
 
 // SetConversationHidden persists the Hidden flag to disk without touching the
@@ -565,6 +576,7 @@ func LoadPersistedSessions() []*SessionMeta {
 			Archived:         f.Archived,
 			Hidden:           f.Hidden,
 			Pinned:           f.Pinned,
+			PermissionMode:   f.PermissionMode,
 			Goal:             f.Goal,
 			Cwd:              f.Cwd,
 			Collection:       f.Collection,

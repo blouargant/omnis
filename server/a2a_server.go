@@ -574,6 +574,7 @@ func (s *a2aServer) runRouted(ctx context.Context, routing *sessionRouting, prom
 	// memory but not write it.
 	if memoryReadOnlyFor("a2a") {
 		ctx = toolkitagent.WithMemoryReadOnly(ctx)
+		ctx = toolkitagent.WithInjectedTurn(ctx, prompt)
 	}
 	parts := []*genai.Part{{Text: prompt}}
 

@@ -60,6 +60,7 @@ import (
 	"time"
 
 	"github.com/blouargant/omnis/agent"
+	"github.com/blouargant/omnis/core/permissions"
 	fstools "github.com/blouargant/omnis/core/tools"
 	"github.com/blouargant/omnis/internal/mcp"
 	"github.com/blouargant/omnis/internal/paths"
@@ -449,6 +450,9 @@ func run() error {
 		// Restore an in-progress /goal (resume semantics): the condition carries
 		// over, the timer/turn count reset. The goal then re-engages on this
 		// session's next user turn (the producer loop evaluates it after the turn).
+		if m, ok := permissions.ParseModeStrict(strings.TrimSpace(meta.PermissionMode)); ok && meta.PermissionMode != "" {
+			infra.PermModes.Set(meta.ID, m)
+		}
 		if infra.GoalStore != nil && strings.TrimSpace(meta.Goal) != "" {
 			infra.GoalStore.Restore(meta.ID, meta.Goal)
 		}
@@ -481,6 +485,7 @@ func run() error {
 		SteerStore:          infra.SteerStore,
 		Budget:              infra.Budget,
 		GoalStore:           infra.GoalStore,
+		PermModes:           infra.PermModes,
 		Scheduler:           infra.Scheduler,
 		PushMgr:             pushMgr,
 		PushEvents:          pushEvents,

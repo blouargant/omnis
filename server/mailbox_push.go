@@ -640,6 +640,11 @@ func (pm *pushManager) injectTurnOpts(ctx context.Context, d serverDeps, session
 	if o.MemoryReadOnly || meta.Hidden {
 		ctx = toolkitagent.WithMemoryReadOnly(ctx)
 	}
+	if o.MemoryReadOnly {
+		// Content-bearing unattended kinds: the auto-mode classifier must not
+		// treat the injected text as the user's words.
+		ctx = toolkitagent.WithInjectedTurn(ctx, o.AnswerPrompt)
+	}
 
 	// Arm the per-turn spend ceiling for this injected turn too. A spawned task or
 	// a scheduled routine runs unattended, so an unbounded one is worse here than

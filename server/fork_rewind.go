@@ -177,6 +177,9 @@ func handleFork(d serverDeps) gin.HandlerFunc {
 		// The fork inherits the source's working directory so its tools/`!cd`
 		// start in the same place.
 		bashCwd.set(newMeta.ID, bashCwd.get(id))
+		// ...and its permission-mode override (ForkConversation copied the
+		// file field; install it in the live store + registry).
+		copyPermissionMode(d, id, newMeta.ID)
 
 		// Mirror the POST /sessions wiring so the fork is a first-class session.
 		if d.RegisterSession != nil {

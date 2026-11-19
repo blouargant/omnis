@@ -17,6 +17,7 @@ import (
 
 	toolkitagent "github.com/blouargant/omnis/agent"
 	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/core/permissions"
 	"github.com/blouargant/omnis/internal/askuser"
 	"github.com/blouargant/omnis/internal/budget"
 	"github.com/blouargant/omnis/internal/compress"
@@ -86,6 +87,9 @@ type serverDeps struct {
 	// /api/sessions/:id/goal routes; the producer loop evaluates it after each
 	// turn and keeps working (or stops) accordingly.
 	GoalStore *goalpkg.Store
+	// PermModes holds the per-session permission-mode overrides (shared with
+	// the agent's permission gate). Nil-safe.
+	PermModes *permissions.ModeStore
 	// PushMgr manages per-session background mailbox watchers.
 	PushMgr *pushManager
 	// Scheduler runs /loop and /schedule jobs on a timer (process-wide, from
@@ -365,13 +369,19 @@ func newEngine(d serverDeps) *gin.Engine {
 		// Body is optional: clients that don't care about squads can POST
 		// with no body or `{}` and get the default squad.
 		var body struct {
-			Squad      string `json:"squad"`
-			Title      string `json:"title"`
-			Dir        string `json:"dir"`
-			Hidden     bool   `json:"hidden"`
-			Collection string `json:"collection"`
+			Squad          string `json:"squad"`
+			Title          string `json:"title"`
+			Dir            string `json:"dir"`
+			Hidden         bool   `json:"hidden"`
+			Collection     string `json:"collection"`
+			PermissionMode string `json:"permission_mode"`
 		}
 		_ = c.ShouldBindJSON(&body)
+		newMode, modeErr := validatePermissionMode(d, body.PermissionMode)
+		if modeErr != nil {
+			c.JSON(modeErr.status, gin.H{"error": modeErr.msg})
+			return
+		}
 		// Resolve the target collection first (canonical stored casing, "" for
 		// General or an unknown name) — its per-session profile can seed the
 		// starting squad + cwd below, so it must be known before the squad default.
@@ -456,6 +466,9 @@ func newEngine(d serverDeps) *gin.Engine {
 		}
 		if title := strings.TrimSpace(body.Title); title != "" {
 			_ = sessions.SetConversationTitle(meta.ID, title)
+		}
+		if body.PermissionMode != "" {
+			applyPermissionMode(d, meta.ID, newMode)
 		}
 		if d.RegisterSession != nil {
 			name := meta.ID
@@ -906,6 +919,8 @@ func newEngine(d serverDeps) *gin.Engine {
 	// /goal — set / inspect / clear a session completion goal. The agent keeps
 	// working across turns until the evaluator judges the condition met. See
 	// server/goal.go.
+	auth.GET("/sessions/:id/permission-mode", handlePermissionModeGet(d))
+	auth.PUT("/sessions/:id/permission-mode", handlePermissionModeSet(d))
 	auth.GET("/sessions/:id/goal", handleGoalStatus(d))
 	auth.POST("/sessions/:id/goal", handleGoalSet(d))
 	auth.DELETE("/sessions/:id/goal", handleGoalClear(d))
