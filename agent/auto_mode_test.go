@@ -96,16 +96,17 @@ func TestAutoJudgeInjectedTurnDropsInjectedFromUserWords(t *testing.T) {
 func TestBuildPermissionGateWiresModeConfigSource(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "permissions.json")
-	if err := os.WriteFile(p, []byte(`{"permissions":{"defaultMode":"acceptEdits"}}`), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte(`{"permissions":{"defaultMode":"plan"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("OMNIS_CONFIG_DIRS", dir)
 	modes := permissions.NewModeStore()
 	_, closeGate, err := buildPermissionGate(RuntimeSettings{PermissionsConfigPath: p}, nil, nil, nil, modes, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer closeGate()
-	if got := modes.Effective("any"); got != permissions.ModeAcceptEdits {
-		t.Fatalf("Effective = %v, want acceptEdits", got)
+	if got := modes.Effective("any"); got != permissions.ModePlan {
+		t.Fatalf("Effective = %v, want plan", got)
 	}
 }
