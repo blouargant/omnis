@@ -1913,7 +1913,7 @@ different tools, skills, and MCP servers").
   the sole holder of every Kubernetes-specific rule.
 - The script decides `deny` / `ask` / proceed using the generic engine
   extensions from "Lifecycle hooks": `DecisionAsk`, `fail_closed`, and the
-  `attempt`/`consecutive`/`agent_name`/`attestations` `Input` fields.
+  `attempt`/`consecutive`/`agent_name`/`attestations` `Input` fields (plus `permission_mode`, see "Per-session permission mode").
 - A reviewer agent, **`k8s_validator`** (`high`, read-only, nested via
   `subagents` under BOTH `k8s_editor` and `k8s_cleaner` — see "Agent topology"),
   records an `APPROVED`/`REJECTED` verdict via the `attest` tool group's one
@@ -3551,6 +3551,84 @@ this session" grant for command bursts instead). The web UI Permissions form
 edits the `deny`/`ask`/`allow` tiers + `defaultMode`, preserving `cwd`/`tools`
 on edited rules.
 
+### Per-session permission mode (`ModeStore`, `auto` classifier)
+
+Spec: [docs/superpowers/specs/2026-11-19-session-permission-mode-design.md](docs/superpowers/specs/2026-11-19-session-permission-mode-design.md).
+The six modes are no longer only the global `defaultMode`: each **session** can
+override it, and `auto` is a real classifier mode.
+
+- **Store** ([core/permissions/mode_store.go](core/permissions/mode_store.go)):
+  `ModeStore` (session id → `Mode`) on `Infrastructure.PermModes`, surviving
+  hot-reload. Effective mode = the override, else the config `defaultMode`
+  (`SetConfigSource` wires the permission reloader). The gate resolves it through
+  `PluginConfig.ModeFunc`/`SessionFunc` (real session id, so sub-agents and
+  injected turns key correctly) and calls `CheckArgsVerdictMode(tool, args, cwd,
+  mode)`; the old `CheckArgsVerdict` keeps the config mode.
+- **`plan` beats session grants**: the verdict is computed *before* the
+  approval cache, so "Allow all Edit this session" no longer survives a switch to
+  `plan`.
+- **`auto`** = the `acceptEdits` step (in-workdir edits, common fs commands never
+  reach the judge) + a classifier ([agent/auto_mode.go](agent/auto_mode.go),
+  [core/permissions/auto.go](core/permissions/auto.go)) **only on default-ask
+  calls** (no rule matched, no clearance, no cache grant). Model:
+  `eval_model_ref` else the root's; non-streamed, `ThinkingBudget: 0`, 20 s, tool
+  args capped at 4096 bytes; input = the user's own words, cwd, agent, tool +
+  args. `ALLOW` proceeds; `BLOCK: reason` denies with `[BLOCKED BY AUTO MODE] …`.
+  Judge error/timeout/unparseable ⇒ the normal card, or a **deny** when
+  `OMNIS_NON_INTERACTIVE` (nobody can answer). Escalation: after 3 consecutive
+  blocks or 20 in total in a session the next default-ask call goes to the user's
+  card; a judge allow and a card answer reset the counters. An explicit `deny`/
+  `ask` rule is never overridden by the judge. Entering `auto` rewrites no rule.
+- **Injected turns** (`WithInjectedTurn`, set for mailbox, background
+  notification, spawn result and A2A — same kinds as the memory read-only guard)
+  hand the judge the injected text *labelled as not coming from the user*, and it
+  blocks actions justified only by it.
+- **`disableBypassPermissionsMode`**: `permissions.disableBypassPermissionsMode:
+  "disable"` is read **only from `<SystemConfigDir>/permissions.json`** (ignored
+  in user/project/skill layers, not editable from Settings — in a shared cookie
+  deployment any user can edit the user layer). When set the route and CLI flag
+  refuse `bypassPermissions`, the web picker omits it, and a persisted/config
+  bypass is treated as `default` (logged once).
+- **Hooks vs mode** (hooks still run before the gate; `Input` carries
+  `permission_mode`):
+
+  | Hook answer | `default`/`acceptEdits`/`plan` | `auto` | `dontAsk` | `bypassPermissions` |
+  |---|---|---|---|---|
+  | `deny`/block | blocks | blocks | blocks | **blocks** |
+  | `ask` | user card | classifier (shared escalation counters; reason given to the judge; error ⇒ card/deny) | blocked | allowed + per-call clearance |
+
+  Accepted consequence: the Kubernetes hook escalates a refusal to `ask` after
+  three identical attempts, so in `bypassPermissions` that change passes on the
+  third retry; its terminal attestation refusals are `deny` and still block in
+  every mode. The administrator can forbid bypass (above).
+- **Telling the agent** ([agent/perm_mode_note.go](agent/perm_mode_note.go)): a
+  short per-mode note appended to each model call of every **non-router** root,
+  only when the mode is not `default` (plan: investigate, present a plan, ask via
+  `AskUserQuestion` to leave plan mode). Stable per mode ⇒ prompt cache misses
+  only on a switch.
+- **Persistence** (server): `permission_mode` on `ConversationFile` +
+  `SessionMeta` (`Registry.SetPermissionMode`, `sessions.SetConversationPermissionMode`),
+  written to disk **once, synchronously** by the route, seeded into the store at
+  boot (`LoadPersistedSessions`), copied by fork/spawn, dropped by import,
+  `Forget` on delete. Empty = follow config.
+- **Routes** ([server/permission_mode.go](server/permission_mode.go)): `GET/PUT
+  /api/sessions/:id/permission-mode` (`PUT {mode}`, `""` = follow config; GET →
+  `{mode, effective, config_mode, bypass_disabled}`), session-less `GET
+  /api/permission-mode` (defaults for a draft), `POST /api/sessions` accepts
+  `permission_mode`; `permission_mode_changed` event on `/api/events`
+  (session-scoped, owner-filtered). `GET /api/sessions` rows carry the mode.
+- **Web** ([web/perm-mode.js](web/perm-mode.js)): a mode pastille left of the
+  context ring opening a menu of the allowed modes, **Shift+Tab** in the composer
+  cycling default → acceptEdits → plan → auto → (bypass if allowed), `/mode
+  [name]` (session section; reserved in `usercommands.ReservedNames`), and a row
+  in the draft picker (sent with the create). `dontAsk` is in the menu, not the
+  cycle. i18n `permmode.*` (en/fr/es/de).
+- **CLI/TUI** ([internal/cli/permmode.go](internal/cli/permmode.go)):
+  `--permission-mode <mode>` flag, `/mode <name>`; TUI **Shift+Tab while the input
+  field has focus** cycles the mode (Tab/Shift+Tab elsewhere keep cycling focus)
+  and the status line shows it.
+- Settings → Permissions still edits only the config default.
+
 ### Session isolation
 
 Every mutable component scopes its state by `(userID, buildTimestamp)`. Concurrent sessions never share task graphs, todo lists, memory, or mailbox namespaces. All session files land in `$OMNIS_HOME/logs/`:
@@ -4608,8 +4686,8 @@ so an existing Claude Code config is portable.
     `DecisionBlock` instead, naming the cause in the reason. Opt-in, not
     default, so a pre-existing hook script that exits non-zero without
     meaning to block keeps working unchanged.
-  - **`Input` (the hook's stdin JSON) gained four fields**, all additive (an
-    unmodified Claude Code script ignores unknown keys): `agent_name` (from
+  - **`Input` (the hook's stdin JSON) gained five fields**, all additive (an
+    unmodified Claude Code script ignores unknown keys): `permission_mode` (the session's effective mode in Claude Code's spelling — `default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions` — on every event with a session, omitted otherwise; a hook may answer `allow` in a mode it wants to step aside in); `agent_name` (from
     `tc.AgentName()`, so a hook can apply a rule to one calling agent but not
     another — e.g. requiring an ephemeral-resource label only for a cleanup
     agent's deletes); `attempt` / `consecutive` (`int`, from the new

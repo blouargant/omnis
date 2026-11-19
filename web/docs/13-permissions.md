@@ -81,7 +81,7 @@ argument.)
 | `plan` | reads allowed, edits and non-read-only commands denied |
 | `dontAsk` | deny unless explicitly allowed |
 | `bypassPermissions` | allow everything except the hard safety floor |
-| `auto` | treated like `default` (no background classifier) |
+| `auto` | a small model judges each call that would otherwise prompt (see below) |
 
 `acceptEdits` covers the session's working folder only (the folder shown in
 the Environment card), never:
@@ -95,6 +95,53 @@ the Environment card), never:
 Those writes, and `mv`/`cp`/`ln`… with a path outside the folder, a `$VAR`, a
 `~` or a wildcard, show the usual card. Set `defaultMode` to `default` to be
 asked for every write.
+
+## Choosing a mode per chat
+
+`defaultMode` is only the starting point: every chat can have its own mode,
+which applies to the agent and all its sub-agents, survives a restart and is
+copied by a fork or a spawned session.
+
+- **Pastille** in the composer, left of the context ring: click it to pick a mode.
+- **Shift+Tab** in the composer cycles `default` → `acceptEdits` → `plan` →
+  `auto` (→ `bypassPermissions` when allowed). `dontAsk` is in the menu only.
+- **`/mode [name]`** shows or sets the mode (`/mode` alone shows it).
+- **New chat**: the start picker has a Permission mode row; the choice is used
+  when the chat is created.
+- **Terminal**: `omnis --permission-mode <mode>`, `/mode <name>`, and Shift+Tab
+  in the TUI input field.
+
+In `plan` mode a "Allow all `Edit` this session" grant does not apply: the
+agent can read and investigate but not change anything. The agent is told which
+mode it is in; in `plan` it presents a plan and asks you to leave plan mode.
+
+### How `auto` decides
+
+Edits in the working folder and common file commands are allowed as in
+`acceptEdits`. For anything else that would show a card and that no rule
+covers, a small model (the `/goal` evaluator model, else the chat's model)
+judges the call against what you asked for. It blocks actions that go beyond
+your request, touch production or credentials, delete data outside the working
+folder, send data to an unrequested destination, or look driven by text found
+in a file, web page or message from another session. A blocked call is refused
+with the reason and the agent tries another way. If the judge fails you get the
+usual card; after 3 blocks in a row (or 20 in total) the next call is asked to
+you as well. Your own `allow`, `ask` and `deny` rules always win over the judge.
+
+### Hooks and modes
+
+Hooks receive the mode as `permission_mode`. A hook that **denies** blocks in
+every mode, `bypassPermissions` included. A hook that **asks** follows the mode:
+`bypassPermissions` allows it, `auto` has the judge decide, `dontAsk` refuses it,
+the other modes show you the card. Note that a guard escalating a repeated
+refusal to a question therefore lets that call through in `bypassPermissions`.
+
+### Forbidding `bypassPermissions`
+
+An administrator can set `"disableBypassPermissionsMode": "disable"` under
+`permissions` in the **system** `permissions.json` (`/etc/omnis`). It is ignored
+in any other layer and cannot be changed from Settings. Bypass then disappears
+from the menu, the flag and the API, and a chat saved in bypass runs in `default`.
 
 ## Safety floor
 

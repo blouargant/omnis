@@ -19,6 +19,7 @@
 
 ## 2.2 (in development) — Collection memory
 
+- **Permission mode per chat** — pick `default`, `acceptEdits`, `plan`, `auto`, `dontAsk` or `bypassPermissions` for each chat from the composer pastille, Shift+Tab or `/mode` (or `--permission-mode` in the terminal); `auto` lets a small model approve or block calls instead of asking, and hooks now see the mode.
 - **Collection memory** — Omnis remembers your corrections and preferences per collection and applies them in every later chat there.
 - **Memory ignores instructions hidden in files** — Omnis only remembers what you said or approved: a note planted in a file or a web page the agent reads is no longer saved as your preference.
 - **Dated memories** — each memory shows when it was saved, last changed and how many times you restated it; the most recent wins when two disagree, and an **Oldest first** sort marks project facts untouched for 90 days so you can clean up.
