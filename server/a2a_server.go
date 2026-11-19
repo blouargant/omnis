@@ -572,11 +572,15 @@ func (s *a2aServer) runRouted(ctx context.Context, routing *sessionRouting, prom
 	ctx = events.WithRootSession(ctx, routing.SessionID)
 	// An inbound A2A call is not the user: the turn may read the collection
 	// memory but not write it.
+	// The squad receives the text framed, so the auto-mode judge and the
+	// memory provenance check recognise it as not the user's once it is in
+	// the history (see agent.A2ATurnPrefix).
+	framed := toolkitagent.FrameA2APrompt(prompt)
 	if memoryReadOnlyFor("a2a") {
 		ctx = toolkitagent.WithMemoryReadOnly(ctx)
-		ctx = toolkitagent.WithInjectedTurn(ctx, prompt)
 	}
-	parts := []*genai.Part{{Text: prompt}}
+	ctx = toolkitagent.WithInjectedTurn(ctx, framed)
+	parts := []*genai.Part{{Text: framed}}
 
 	run := func(rctx context.Context, sq *toolkitagent.SquadInstance, squadName string, hopParts []*genai.Part) (string, error) {
 		isRouter := routerSquad != "" && squadName == routerSquad

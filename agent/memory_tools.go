@@ -259,7 +259,10 @@ func memoryTools(verify memoryVerifier, notes func(sessionID string) []string) [
 					return memorySaveOut{Error: errMemReadOnly}, nil
 				}
 				if verify != nil && strings.TrimSpace(in.Content) != "" {
-					user, reply := sessionUserWordsStore.get(sid)
+					recorded, reply := sessionUserWordsStore.get(sid)
+					// Earlier mailbox / spawn-result / background / A2A turns are
+					// in the recorded history as user-role messages: not the user.
+					user, _ := splitUserWords(recorded, "")
 					if notes != nil {
 						user = append(user, notes(sid)...)
 					}

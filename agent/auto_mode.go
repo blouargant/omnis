@@ -110,9 +110,17 @@ func fenced(label, text string) string {
 // injectedPrefixes head the prompts the server builds for turns the user did
 // not write: a cross-session message (server/mailbox_push.go), a spawned
 // session's result (server/spawn.go formatSpawnResultNotice) and background
-// task notifications (internal/bg FormatNotification). Earlier such turns are
+// task notifications (internal/bg FormatNotification), an inbound A2A call
+// (A2ATurnPrefix). Earlier such turns are
 // in the recorded history as user-role messages; they are not the user.
-var injectedPrefixes = []string{"[mailbox]", "[Spawned session ", "[Background ", "[Monitor "}
+var injectedPrefixes = []string{"[mailbox]", "[Spawned session ", "[Background ", "[Monitor ", A2ATurnPrefix}
+
+// A2ATurnPrefix heads the text of an inbound A2A turn (server/a2a_server.go),
+// so the turn is recognised as not the user's once it is in the history.
+const A2ATurnPrefix = "[A2A message from a remote agent]"
+
+// FrameA2APrompt is the text an inbound A2A turn hands the squad.
+func FrameA2APrompt(prompt string) string { return A2ATurnPrefix + "\n" + prompt }
 
 func isInjectedText(s string) bool {
 	s = strings.TrimSpace(s)
@@ -177,7 +185,35 @@ func parseAutoVerdict(text string) (permissions.AutoVerdict, bool) {
 // runAutoJudge asks lm about one call. userWords are the session's user
 // messages; earlier injected turns and the running one go to the injected
 // section (see splitUserWords).
-func runAutoJudge(ctx context.Context, lm model.LLM, userWords []string, tool string, args map[string]any, cwd, why, agentName string) (permissions.AutoVerdict, error) {
+// autoPrices are the judge model's prices ($ per million tokens).
+type autoPrices struct{ In, Out, Cached float64 }
+
+// cost returns the dollar cost of one judge call from its usage.
+func (p autoPrices) cost(u *genai.GenerateContentResponseUsageMetadata) float64 {
+	if u == nil {
+		return 0
+	}
+	cached := float64(u.CachedContentTokenCount)
+	fresh := float64(u.PromptTokenCount) - cached
+	if fresh < 0 {
+		fresh = 0
+	}
+	cp := p.Cached
+	if cp == 0 {
+		cp = p.In
+	}
+	return (fresh*p.In + cached*cp + float64(u.CandidatesTokenCount)*p.Out) / 1e6
+}
+
+// judgeUsageNote is the "(judge N in / M out tokens, $x)" suffix of a verdict log line.
+func judgeUsageNote(u *genai.GenerateContentResponseUsageMetadata, p autoPrices) string {
+	if u == nil {
+		return "(judge usage unknown)"
+	}
+	return fmt.Sprintf("(judge %d in / %d out tokens, $%.6f)", u.PromptTokenCount, u.CandidatesTokenCount, p.cost(u))
+}
+
+func runAutoJudge(ctx context.Context, lm model.LLM, prices autoPrices, userWords []string, tool string, args map[string]any, cwd, why, agentName string) (permissions.AutoVerdict, error) {
 	current, _ := injectedTurnText(ctx)
 	words, injected := splitUserWords(userWords, current)
 	raw, _ := json.Marshal(args)
@@ -185,9 +221,13 @@ func runAutoJudge(ctx context.Context, lm model.LLM, userWords []string, tool st
 	defer cancel()
 	req := buildAutoRequest(autoInput{UserWords: words, Injected: injected, Cwd: cwd, Agent: agentName, Tool: tool, Args: string(raw), Why: why})
 	var out strings.Builder
+	var usage *genai.GenerateContentResponseUsageMetadata
 	for resp, err := range lm.GenerateContent(rctx, req, false) {
 		if err != nil {
 			return permissions.AutoVerdict{}, err
+		}
+		if resp != nil && resp.UsageMetadata != nil {
+			usage = resp.UsageMetadata
 		}
 		if resp != nil && resp.Content != nil {
 			for _, p := range resp.Content.Parts {
@@ -201,10 +241,11 @@ func runAutoJudge(ctx context.Context, lm model.LLM, userWords []string, tool st
 	if !ok {
 		return permissions.AutoVerdict{}, fmt.Errorf("auto mode: no verdict (%q)", headRunes(out.String(), 80))
 	}
+	note := judgeUsageNote(usage, prices)
 	if v.Allow {
-		log.Printf("auto: allow %s", tool)
+		log.Printf("auto: allow %s %s", tool, note)
 	} else {
-		log.Printf("auto: block %s: %s", tool, v.Reason)
+		log.Printf("auto: block %s: %s %s", tool, v.Reason, note)
 	}
 	return v, nil
 }
@@ -216,6 +257,7 @@ func newAutoJudge(runtime RuntimeSettings, root RuntimeAgentConfig) permissions.
 		once   sync.Once
 		mdl    model.LLM
 		mdlErr error
+		prices = autoPrices{root.InputTokenPricePerMillion, root.OutputTokenPricePerMillion, root.CachedInputTokenPricePerMillion}
 	)
 	build := func(ctx context.Context) (model.LLM, error) {
 		once.Do(func() {
@@ -223,6 +265,7 @@ func newAutoJudge(runtime RuntimeSettings, root RuntimeAgentConfig) permissions.
 				if mc, ok := runtime.Models[ref]; ok {
 					if m, err := llm.NewWithSelection(ctx, selectionFromModelConfig(mc)); err == nil {
 						mdl = m
+						prices = autoPrices{mc.InputTokenPricePerMillion, mc.OutputTokenPricePerMillion, mc.CachedInputTokenPricePerMillion}
 						return
 					}
 				}
@@ -247,6 +290,6 @@ func newAutoJudge(runtime RuntimeSettings, root RuntimeAgentConfig) permissions.
 			return permissions.AutoVerdict{}, err
 		}
 		words, _ := sessionUserWordsStore.get(sid)
-		return runAutoJudge(ctx, lm, words, tool, args, cwd, why, agentName)
+		return runAutoJudge(ctx, lm, prices, words, tool, args, cwd, why, agentName)
 	}
 }
