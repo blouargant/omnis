@@ -377,6 +377,7 @@ func newEngine(d serverDeps) *gin.Engine {
 			PermissionMode string `json:"permission_mode"`
 		}
 		_ = c.ShouldBindJSON(&body)
+		body.PermissionMode = strings.TrimSpace(body.PermissionMode)
 		newMode, modeErr := validatePermissionMode(d, body.PermissionMode)
 		if modeErr != nil {
 			c.JSON(modeErr.status, gin.H{"error": modeErr.msg})

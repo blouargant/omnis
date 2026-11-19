@@ -356,23 +356,17 @@ func (r *Registry) SetPinned(id string, v bool) bool {
 }
 
 // SetPermissionMode sets (or clears, with "") the session's permission-mode
-// override (in-memory + persisted asynchronously). Returns true when found.
+// override in memory ONLY. Callers persist with SetConversationPermissionMode
+// themselves (synchronously), so there is exactly one ordered disk write.
+// Returns true when a session was found.
 func (r *Registry) SetPermissionMode(id, mode string) bool {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	m, ok := r.items[id]
 	if ok {
 		m.PermissionMode = mode
 	}
-	r.mu.Unlock()
-	if !ok {
-		return false
-	}
-	go func() {
-		if err := SetConversationPermissionMode(id, mode); err != nil {
-			log.Printf("sessions: failed to persist permission mode for session %s: %v", id, err)
-		}
-	}()
-	return true
+	return ok
 }
 
 // SetSquad updates the squad a session is bound to (in-memory + persisted to

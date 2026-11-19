@@ -253,3 +253,32 @@ func TestPermissionModeChangedEvent(t *testing.T) {
 	}
 	t.Fatal("event never arrived")
 }
+
+// Back-to-back PUT plan / PUT "" must leave the file without a mode: the disk
+// write happens once, synchronously, so there is no goroutine ordering race.
+func TestPermissionModeRapidChangesPersistLast(t *testing.T) {
+	f := newPMFixture(t)
+	id := f.seed()
+	base := "/api/sessions/" + id + "/permission-mode"
+	for i := 0; i < 50; i++ {
+		f.do(http.MethodPut, base, `{"mode":"plan"}`)
+		f.do(http.MethodPut, base, `{"mode":""}`)
+	}
+	time.Sleep(100 * time.Millisecond)
+	file, _ := sessions.LoadConversationFile(id)
+	if file.PermissionMode != "" {
+		t.Fatalf("file holds %q after clear", file.PermissionMode)
+	}
+}
+
+func TestCreateSessionWhitespaceModeIsEmpty(t *testing.T) {
+	f := newPMFixture(t)
+	w := f.do(http.MethodPost, "/api/sessions", `{"permission_mode":"   "}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d", w.Code)
+	}
+	id := decodePM(t, w)["session_id"].(string)
+	if _, ok := f.modes.Get(id); ok {
+		t.Fatal("whitespace mode installed an override")
+	}
+}
