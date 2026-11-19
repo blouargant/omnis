@@ -32,6 +32,7 @@ import (
 
 	"github.com/blouargant/omnis/agent"
 	"github.com/blouargant/omnis/core/events"
+	"github.com/blouargant/omnis/core/permissions"
 	"github.com/blouargant/omnis/internal/claudeformat"
 	"github.com/blouargant/omnis/internal/cli"
 	"github.com/blouargant/omnis/internal/paths"
@@ -54,6 +55,8 @@ type options struct {
 	appName    string
 	configPath string
 	debug      bool
+	// permissionMode is the --permission-mode launch flag (empty = config).
+	permissionMode string
 }
 
 // newFlagSet wires the global omnis flags onto opts and returns the
@@ -68,6 +71,7 @@ func newFlagSet(opts *options) *flag.FlagSet {
 	fs.String("curator-enabled", "", "Deprecated, ignored")
 	fs.BoolVar(&opts.debug, "debug", false, "Log full conversation/event payloads")
 	fs.BoolVar(&opts.debug, "d", false, "Log full conversation/event payloads (shorthand)")
+	fs.StringVar(&opts.permissionMode, "permission-mode", "", "Start the session in a permission mode (default, acceptEdits, plan, auto, dontAsk, bypassPermissions)")
 	fs.Usage = func() { printUsage(fs) }
 	return fs
 }
@@ -179,6 +183,7 @@ func runCLI(ctx context.Context, opts options, promptArgs []string) error {
 		return err
 	}
 	defer infra.Close()
+	checkPermissionModeFlag(opts, infra.PermModes)
 	if agentOpts.Repo == "" {
 		agentOpts.Repo = infra.Repo
 	}
@@ -220,6 +225,8 @@ func runCLI(ctx context.Context, opts options, promptArgs []string) error {
 		AskUserRegistry: infra.AskUserRegistry,
 		BgQueues:        infra.BgQueues,
 		SteerStore:      infra.SteerStore,
+		PermModes:       infra.PermModes,
+		PermissionMode:  opts.permissionMode,
 		Budget:          infra.Budget,
 		TimeLimit:       inst.Settings.TurnBudget.MaxDuration,
 		Scheduler:       infra.Scheduler,
@@ -245,6 +252,7 @@ func runTUI(ctx context.Context, opts options) error {
 		return err
 	}
 	defer infra.Close()
+	checkPermissionModeFlag(opts, infra.PermModes)
 	if agentOpts.Repo == "" {
 		agentOpts.Repo = infra.Repo
 	}
@@ -284,6 +292,8 @@ func runTUI(ctx context.Context, opts options) error {
 		WatchMailbox:                      infra.WatchMailbox,
 		BgQueues:                          infra.BgQueues,
 		SteerStore:                        infra.SteerStore,
+		PermModes:                         infra.PermModes,
+		PermissionMode:                    opts.permissionMode,
 		Budget:                            infra.Budget,
 		TimeLimit:                         inst.Settings.TurnBudget.MaxDuration,
 		Scheduler:                         infra.Scheduler,
@@ -402,4 +412,16 @@ func appendAgentNameToConfig(readPath, writePath, name string) error {
 		return err
 	}
 	return os.WriteFile(writePath, out, 0o644)
+}
+
+// checkPermissionModeFlag rejects an invalid --permission-mode (or
+// bypassPermissions while bypass is disabled) before any session starts.
+func checkPermissionModeFlag(opts options, store *permissions.ModeStore) {
+	if opts.permissionMode == "" {
+		return
+	}
+	if _, err := cli.ValidatePermissionModeFlag(opts.permissionMode, store.BypassDisabled()); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(2)
+	}
 }

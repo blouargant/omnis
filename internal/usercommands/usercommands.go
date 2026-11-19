@@ -144,6 +144,7 @@ var nameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,40}$`)
 // cannot shadow them.
 var ReservedNames = map[string]struct{}{
 	"help":         {},
+	"mode":         {},
 	"compress":     {},
 	"create-skill": {},
 	"update-skill": {},

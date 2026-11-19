@@ -17,6 +17,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"github.com/blouargant/omnis/core/permissions"
+	"github.com/blouargant/omnis/internal/cli"
 	"io"
 	"os"
 	"os/signal"
@@ -254,6 +256,10 @@ type Config struct {
 	// while a turn is computing: queued via the steering plugin's drain during
 	// the turn, with leftover run as a follow-up turn here. Nil-safe.
 	SteerStore *steer.Store
+	// PermModes, when non-nil, enables /mode, Shift+Tab mode cycling and the
+	// status-line mode; PermissionMode is the --permission-mode flag value.
+	PermModes      *permissions.ModeStore
+	PermissionMode string
 	// Budget + TimeLimit arm the turn's wall-clock limit only (see cli.Config).
 	Budget    *budget.Store
 	TimeLimit time.Duration
@@ -370,7 +376,7 @@ func Run(ctx context.Context, cfg Config) error {
 
 	// Slash-command autocomplete: suggest matching commands when the
 	// user starts typing "/".
-	slashCommands := []string{"/help", "/compress", "/create-skill", "/create-skill ", "/update-skill ", "/status", "/init", "/goal ", "/upload ", "/new"}
+	slashCommands := []string{"/help", "/compress", "/create-skill", "/create-skill ", "/update-skill ", "/status", "/init", "/goal ", "/mode ", "/upload ", "/new"}
 	slashCommandsDisplay := []string{
 		"/help",
 		"/compress",
@@ -592,6 +598,23 @@ func Run(ctx context.Context, cfg Config) error {
 		t.output += out
 		tokenMu.Unlock()
 	}
+	// ensureFlagMode applies the --permission-mode flag to a session once.
+	var flagModeMu sync.Mutex
+	flagModeApplied := map[string]bool{}
+	ensureFlagMode := func(sid string) {
+		if cfg.PermModes == nil || cfg.PermissionMode == "" {
+			return
+		}
+		flagModeMu.Lock()
+		defer flagModeMu.Unlock()
+		if flagModeApplied[sid] {
+			return
+		}
+		flagModeApplied[sid] = true
+		if m, err := cli.ValidatePermissionModeFlag(cfg.PermissionMode, cfg.PermModes.BypassDisabled()); err == nil {
+			cfg.PermModes.Set(sid, m)
+		}
+	}
 	setStatus := func() {
 		cur := current.Load()
 		sid, squad := "", ""
@@ -600,7 +623,14 @@ func Run(ctx context.Context, cfg Config) error {
 			squad = cur.Squad
 		}
 		in, cached, cacheCreate, out := currentTokens()
-		status.SetText(buildStatusText(cfg, sid, squad, in, cached, cacheCreate, out))
+		text := buildStatusText(cfg, sid, squad, in, cached, cacheCreate, out)
+		if cfg.PermModes != nil && sid != "" {
+			ensureFlagMode(sid)
+			if m := cfg.PermModes.Effective(sid); m != permissions.ModeDefault {
+				text += fmt.Sprintf("   mode: [yellow]%s[-]", m)
+			}
+		}
+		status.SetText(text)
 	}
 	setStatus()
 
@@ -1288,6 +1318,21 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 		cmd := strings.TrimPrefix(strings.ToLower(fields[0]), "/")
 		switch cmd {
+		case "mode":
+			appendChat("\n[::b]assistant[-]\n")
+			cur := current.Load()
+			if cfg.PermModes == nil || cur == nil {
+				appendChat("[yellow]Permission modes are unavailable.[-]\n")
+				return
+			}
+			ensureFlagMode(cur.ID)
+			arg := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
+			if msg, err := cli.ApplyModeCommand(cfg.PermModes, cur.ID, arg); err != nil {
+				appendChat("[red]%s[-]\n", tview.Escape(err.Error()))
+			} else {
+				appendChat("%s\n", msg)
+				setStatus()
+			}
 		case "create-skill":
 			name := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
 			if name == "" {
@@ -1889,6 +1934,15 @@ func Run(ctx context.Context, cfg Config) error {
 			cycleFocus(1)
 			return nil
 		case tcell.KeyBacktab:
+			if focusIdx == 0 && cfg.PermModes != nil {
+				if cur := current.Load(); cur != nil {
+					ensureFlagMode(cur.ID)
+					next := cli.CycleMode(cfg.PermModes.Effective(cur.ID), !cfg.PermModes.BypassDisabled())
+					cfg.PermModes.Set(cur.ID, next)
+					setStatus()
+				}
+				return nil
+			}
 			cycleFocus(-1)
 			return nil
 		case tcell.KeyCtrlL:

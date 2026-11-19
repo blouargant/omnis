@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/blouargant/omnis/core/permissions"
 	"io"
 	"iter"
 	"os"
@@ -70,6 +71,10 @@ type Config struct {
 	// at the next model boundary, or run as a follow-up turn). Nil-safe — when
 	// nil the REPL ignores input typed during a turn (the old behaviour).
 	SteerStore *steer.Store
+	// PermModes, when non-nil, enables /mode and applies PermissionMode (the
+	// --permission-mode flag) as the session's override.
+	PermModes      *permissions.ModeStore
+	PermissionMode string
 	// Budget + TimeLimit arm the turn's wall-clock limit (turn_budget
 	// max_seconds) so the agents are told how much time is left. Only the time
 	// axis is armed: the CLI keeps not prompting on spend.
@@ -113,6 +118,11 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	if cfg.SessionID == "" {
 		cfg.SessionID = fmt.Sprintf("cli-%d", time.Now().Unix())
+	}
+	if cfg.PermModes != nil && cfg.PermissionMode != "" {
+		if m, err := ValidatePermissionModeFlag(cfg.PermissionMode, cfg.PermModes.BypassDisabled()); err == nil {
+			cfg.PermModes.Set(cfg.SessionID, m)
+		}
 	}
 	if cfg.AppName == "" {
 		cfg.AppName = "omnis"
@@ -388,6 +398,16 @@ func runRepl(ctx context.Context, cfg Config) error {
 				} else {
 					showPrompt()
 				}
+				continue
+			} else if lc := strings.ToLower(prompt); lc == "/mode" || strings.HasPrefix(lc, "/mode ") {
+				if cfg.PermModes == nil {
+					fmt.Fprintln(cfg.Stderr, "permission modes are unavailable")
+				} else if msg, err := applyModeCommand(cfg.PermModes, cfg.SessionID, strings.TrimSpace(prompt[len("/mode"):])); err != nil {
+					fmt.Fprintln(cfg.Stderr, err)
+				} else {
+					fmt.Fprintln(cfg.Stdout, msg)
+				}
+				showPrompt()
 				continue
 			} else if strings.HasPrefix(prompt, "/") {
 				if quit := handleSlash(cfg, prompt); quit {
