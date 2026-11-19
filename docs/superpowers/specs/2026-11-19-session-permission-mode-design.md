@@ -75,7 +75,8 @@ turns). `CheckArgsVerdict` gains a variant taking the mode explicitly
 (`CheckArgsVerdictMode(tool, args, cwd, mode)`); the old signature keeps using
 the config mode, so CLI examples and tests are unchanged.
 
-`PluginConfig` gains `ModeFunc func(tc) (Mode, bool)` (nil ⇒ config mode).
+`PluginConfig` gains `Modes *ModeStore` (nil ⇒ config mode); the gate calls
+`Modes.EffectiveWith(sid, <its live snapshot's defaultMode>)`.
 
 ### 2. Plan mode beats session grants (bug fix)
 
@@ -99,7 +100,7 @@ a default ask becomes a deny.)
 
 Support Claude Code's `permissions.disableBypassPermissionsMode: "disable"`
 in `permissions.json`, **read from the system layer only** (`/etc/omnis`,
-i.e. `paths.SystemConfigDir`; the key is ignored in user, project and skill
+i.e. `paths.SystemDir()` (honours `OMNIS_SYSTEM_CONFIG_DIR`); the key is ignored in user, project and skill
 layers and is not editable from Settings). Settings are global and editable
 by any user in a shared (cookie) deployment, so a user-layer value could be
 lifted by anyone; only the administrator controls the system layer. When set: the server route and CLI flag refuse `bypassPermissions`, the

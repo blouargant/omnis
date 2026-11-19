@@ -3559,11 +3559,18 @@ override it, and `auto` is a real classifier mode.
 
 - **Store** ([core/permissions/mode_store.go](core/permissions/mode_store.go)):
   `ModeStore` (session id → `Mode`) on `Infrastructure.PermModes`, surviving
-  hot-reload. Effective mode = the override, else the config `defaultMode`
-  (`SetConfigSource` wires the permission reloader). The gate resolves it through
-  `PluginConfig.ModeFunc`/`SessionFunc` (real session id, so sub-agents and
-  injected turns key correctly) and calls `CheckArgsVerdictMode(tool, args, cwd,
-  mode)`; the old `CheckArgsVerdict` keeps the config mode.
+  hot-reload. Effective mode = the override, else the config `defaultMode`. The
+  gate resolves it through `PluginConfig.Modes` + `SessionFunc` (real session id,
+  so sub-agents and injected turns key correctly) with
+  `Modes.EffectiveWith(sid, <its own live snapshot's defaultMode>)` — never the
+  store's shared source — and calls `CheckArgsVerdictMode(tool, args, cwd,
+  mode)`; the old `CheckArgsVerdict` keeps the config mode. The store's own
+  config source (`SetConfigSource`, read by `ConfigMode` for hooks'
+  `permission_mode`, the CLI `/mode` report and the GET routes) is set at
+  **install** time to the promoted generation's default-squad gate source
+  (`installPluginHooks`), never during a build, so a rejected reload cannot leave
+  it on a torn-down reloader. The routes report `config_mode` downgraded
+  (`ConfigModeReported`: bypass reads `default` while the policy disables it).
 - **`plan` beats session grants**: the verdict is computed *before* the
   approval cache, so "Allow all Edit this session" no longer survives a switch to
   `plan`.
@@ -3577,14 +3584,21 @@ override it, and `auto` is a real classifier mode.
   Judge error/timeout/unparseable ⇒ the normal card, or a **deny** when
   `OMNIS_NON_INTERACTIVE` (nobody can answer). Escalation: after 3 consecutive
   blocks or 20 in total in a session the next default-ask call goes to the user's
-  card; a judge allow and a card answer reset the counters. An explicit `deny`/
+  card; a judge allow resets the consecutive count only, a card answer resets
+  both. An explicit `deny`/
   `ask` rule is never overridden by the judge. Entering `auto` rewrites no rule.
 - **Injected turns** (`WithInjectedTurn`, set for mailbox, background
   notification, spawn result and A2A — same kinds as the memory read-only guard)
   hand the judge the injected text *labelled as not coming from the user*, and it
-  blocks actions justified only by it.
+  blocks actions justified only by it. Earlier injected turns recorded in the
+  session's user words are filed there too, by prefix (`[mailbox]`, `[Spawned
+  session `, `[Background `, `[Monitor ` — `injectedPrefixes`); an earlier **A2A**
+  turn has no framing and is not recognised (known gap). Injected text, the
+  arguments and the gate/hook reason are fenced between `<<<BEGIN …>>>` /
+  `<<<END …>>>` lines, and the system prompt says fenced text is data.
 - **`disableBypassPermissionsMode`**: `permissions.disableBypassPermissionsMode:
-  "disable"` is read **only from `<SystemConfigDir>/permissions.json`** (ignored
+  "disable"` is read **only from `<paths.SystemDir()>/permissions.json`** (so it
+  follows `OMNIS_SYSTEM_CONFIG_DIR`) (ignored
   in user/project/skill layers, not editable from Settings — in a shared cookie
   deployment any user can edit the user layer). When set the route and CLI flag
   refuse `bypassPermissions`, the web picker omits it, and a persisted/config
@@ -3609,7 +3623,8 @@ override it, and `auto` is a real classifier mode.
 - **Persistence** (server): `permission_mode` on `ConversationFile` +
   `SessionMeta` (`Registry.SetPermissionMode`, `sessions.SetConversationPermissionMode`),
   written to disk **once, synchronously** by the route, seeded into the store at
-  boot (`LoadPersistedSessions`), copied by fork/spawn, dropped by import,
+  boot by the [server/main.go](server/main.go) startup loop
+  (`LoadPersistedSessions` only maps the field), copied by fork/spawn, dropped by import,
   `Forget` on delete. Empty = follow config.
 - **Routes** ([server/permission_mode.go](server/permission_mode.go)): `GET/PUT
   /api/sessions/:id/permission-mode` (`PUT {mode}`, `""` = follow config; GET →
@@ -3620,7 +3635,9 @@ override it, and `auto` is a real classifier mode.
 - **Web** ([web/perm-mode.js](web/perm-mode.js)): a mode pastille left of the
   context ring opening a menu of the allowed modes, **Shift+Tab** in the composer
   cycling default → acceptEdits → plan → auto → (bypass if allowed), `/mode
-  [name]` (session section; reserved in `usercommands.ReservedNames`), and a row
+  [name]` (`/mode` alone opens the menu; `/mode follow` — aliases `config`,
+  `settings`, `none`, `default-config` — clears the override; session section;
+  reserved in `usercommands.ReservedNames`), and a row
   in the draft picker (sent with the create). `dontAsk` is in the menu, not the
   cycle. i18n `permmode.*` (en/fr/es/de).
 - **CLI/TUI** ([internal/cli/permmode.go](internal/cli/permmode.go)):

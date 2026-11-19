@@ -3812,7 +3812,12 @@ async function refreshPermConfig() {
     for (const p of panels) { renderPermPastille(p); if (p.activeTab && isDraft(p.activeTab)) renderPickerPerm(p); }
   } catch (_) { /* keep defaults */ }
 }
-window.addEventListener("omnis:config-reloaded", refreshPermConfig);
+// After a reload the configured mode may have changed: refetch every cached
+// session so pastilles of sessions without an override show the new one.
+window.addEventListener("omnis:config-reloaded", () => {
+  refreshPermConfig();
+  for (const sid of Array.from(sessionPermMode.keys())) refreshPermMode(sid);
+});
 
 function renderPermPastille(panel) {
   const btn = panel && panel.els.permModeBtn;

@@ -105,11 +105,11 @@ copied by a fork or a spawned session.
 - **Pastille** in the composer, left of the context ring: click it to pick a mode.
 - **Shift+Tab** in the composer cycles `default` → `acceptEdits` → `plan` →
   `auto` (→ `bypassPermissions` when allowed). `dontAsk` is in the menu only.
-- **`/mode [name]`** shows or sets the mode (`/mode` alone shows it).
+- **`/mode [name]`** sets the mode; `/mode` alone opens the mode menu. `/mode follow` (aliases `config`, `settings`, `none`, `default-config`) removes the chat's own mode so it follows `defaultMode` again.
 - **New chat**: the start picker has a Permission mode row; the choice is used
   when the chat is created.
-- **Terminal**: `omnis --permission-mode <mode>`, `/mode <name>`, and Shift+Tab
-  in the TUI input field.
+- **Terminal**: `omnis --permission-mode <mode>`, `/mode <name>` (`/mode` alone
+  prints the current mode), and Shift+Tab in the TUI input field.
 
 In `plan` mode a "Allow all `Edit` this session" grant does not apply: the
 agent can read and investigate but not change anything. The agent is told which
