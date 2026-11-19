@@ -3587,6 +3587,18 @@ override it, and `auto` is a real classifier mode.
   card; a judge allow resets the consecutive count only, a card answer resets
   both. An explicit `deny`/
   `ask` rule is never overridden by the judge. Entering `auto` rewrites no rule.
+- **The judge's prompt judges EFFECTS, not literal match** (`autoSystemPrompt`,
+  pinned by `TestAutoSystemPromptAllowsIntermediateSteps`). The first wording
+  ("ALLOW a call that plausibly serves what the user asked… BLOCK one that goes
+  beyond it") made it refuse every intermediate step: `gofmt -l` or `git status`
+  before the edit, a `git commit` because the file was created in another call —
+  **7 wrong blocks out of 16** verdicts on 4 requested tasks (omnis-benches
+  `reports/permission-mode-auto-2026-11-19.md`, run 2). Saying that reads,
+  searches, git history, builds, tests and linters are part of the request, and
+  listing the lasting/out-of-scope effects to block on, brought it to **1/10**
+  at the same task success (12/12, like `bypassPermissions`). Re-run that bench
+  (`squad-bench/tasks-permmode.json`, `PERM_MODE=` in `setup-ab.sh`) before
+  rewording the prompt.
 - **Injected turns** (`WithInjectedTurn`, set for mailbox, background
   notification, spawn result and A2A — same kinds as the memory read-only guard)
   hand the judge the injected text *labelled as not coming from the user*, and it
