@@ -115,6 +115,12 @@ func buildPlugins(
 			plugins = append(plugins, sp)
 		}
 	}
+	// Tell the root agent its session's permission mode (no-op in default mode).
+	if !isRouterSquad && infra.PermModes != nil {
+		if pmp, perr := permModePlugin(infra.PermModes); perr == nil && pmp != nil {
+			plugins = append(plugins, pmp)
+		}
+	}
 	// Token-saving coding transforms (edit-fused diagnostics, unchanged-read
 	// dedup, universal output shaper). Mounted on answering roots only (the
 	// router never runs fs/edit tools); a no-op until a tool result is large,
