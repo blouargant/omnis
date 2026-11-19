@@ -229,13 +229,17 @@ func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hoo
 				return map[string]any{
 					"output": fmt.Sprintf("[BLOCKED BY HOOK] %s: dontAsk mode: the hook asked for confirmation", t.Name()),
 				}, nil
-			case mode == permissions.ModeAuto && perm.Judge != nil:
+			case mode == permissions.ModeAuto && perm.Judge != nil && (nonInteractive() || !perm.Modes.AutoEscalated(sid)):
+				// Same counters as the gate's auto path, so hook and gate
+				// verdicts escalate to the user together.
 				if v, jerr := perm.Judge(tc, t.Name(), args, cwd, reason); jerr == nil {
 					if v.Allow {
+						perm.Modes.AutoAllowed(sid)
 						state.RecordOutcome(sid, t.Name(), false)
 						grant()
 						return nil, nil
 					}
+					perm.Modes.AutoBlocked(sid)
 					state.RecordOutcome(sid, t.Name(), true)
 					return map[string]any{"output": permissions.AutoBlockMessage(t.Name(), v.Reason)}, nil
 				}
@@ -258,7 +262,10 @@ func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hoo
 						t.Name(), reason),
 				}, nil
 			}
-			if askHookPermission(tc, reg, sid, t.Name(), reason) {
+			allowed := askHookPermission(tc, reg, sid, t.Name(), reason)
+			// The user answered a card: auto mode's block counters start over.
+			perm.Modes.ResetAuto(sid)
+			if allowed {
 				state.RecordOutcome(sid, t.Name(), false)
 				grant()
 				return nil, nil

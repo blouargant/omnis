@@ -20,6 +20,7 @@ type modeRig struct {
 	asked  atomic.Int32
 	judged atomic.Int32
 	clear  *permissions.Clearances
+	modes  *permissions.ModeStore
 }
 
 func newModeRig(t *testing.T, hookCmd string, mode permissions.Mode, judge permissions.AutoJudge) *modeRig {
@@ -39,6 +40,7 @@ func newModeRig(t *testing.T, hookCmd string, mode permissions.Mode, judge permi
 		go func() { _ = reg.Resolve(q.SessionID, q.ID, askuser.Answer{Selected: []string{choiceHookDeny}}) }()
 	})
 	modes := permissions.NewModeStore()
+	r.modes = modes
 	modes.Set("s1", mode)
 	var wrapped permissions.AutoJudge
 	if judge != nil {
@@ -117,6 +119,57 @@ func TestHookAskAutoJudgeErrorFallsThroughToAsk(t *testing.T) {
 	r.before(wtc("a"), "Bash", map[string]any{"command": "x"})
 	if r.asked.Load() != 1 {
 		t.Fatalf("asked = %d, want 1", r.asked.Load())
+	}
+	if r.judged.Load() != 1 {
+		t.Fatalf("judged = %d, want 1", r.judged.Load())
+	}
+}
+
+func blockJudge(adk.ToolContext, string, map[string]any, string, string) (permissions.AutoVerdict, error) {
+	return permissions.AutoVerdict{Allow: false, Reason: "nope"}, nil
+}
+
+func TestHookAutoBlocksEscalateToTheCard(t *testing.T) {
+	r := newModeRig(t, askCmd, permissions.ModeAuto, blockJudge)
+	for i := 0; i < 3; i++ {
+		out := r.before(wtc("a"), "Bash", map[string]any{"command": "x"})
+		if !strings.Contains(outStr(out), "AUTO MODE") {
+			t.Fatalf("call %d: %v", i, out)
+		}
+	}
+	r.before(wtc("a"), "Bash", map[string]any{"command": "x"})
+	if r.judged.Load() != 3 {
+		t.Fatalf("judged = %d, want 3 (4th must skip the judge)", r.judged.Load())
+	}
+	if r.asked.Load() != 1 {
+		t.Fatalf("asked = %d, want 1", r.asked.Load())
+	}
+	if r.modes.AutoEscalated("s1") {
+		t.Fatal("answering the card must reset the auto counters")
+	}
+}
+
+func TestHookAskHonoursEscalationFromTheGate(t *testing.T) {
+	r := newModeRig(t, askCmd, permissions.ModeAuto, blockJudge)
+	for i := 0; i < 3; i++ {
+		r.modes.AutoBlocked("s1") // the gate's blocks
+	}
+	r.before(wtc("a"), "Bash", map[string]any{"command": "x"})
+	if r.judged.Load() != 0 || r.asked.Load() != 1 {
+		t.Fatalf("judged=%d asked=%d, want 0/1", r.judged.Load(), r.asked.Load())
+	}
+}
+
+func TestHookAutoAllowResetsConsecutive(t *testing.T) {
+	allow := func(adk.ToolContext, string, map[string]any, string, string) (permissions.AutoVerdict, error) {
+		return permissions.AutoVerdict{Allow: true}, nil
+	}
+	r := newModeRig(t, askCmd, permissions.ModeAuto, allow)
+	r.modes.AutoBlocked("s1")
+	r.modes.AutoBlocked("s1")
+	r.before(wtc("a"), "Bash", map[string]any{"command": "x"})
+	if r.modes.AutoBlocked("s1") { // would be 3rd consecutive had allow not reset
+		t.Fatal("allow should have reset the consecutive count")
 	}
 }
 
