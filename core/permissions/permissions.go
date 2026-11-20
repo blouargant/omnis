@@ -284,6 +284,9 @@ func (c *Config) Check(toolName, input, cwd string) (Decision, string) {
 	return c.CheckArgs(toolName, args, cwd)
 }
 
+// DeniedPrefix opens the tool output the gate returns for a denied call.
+const DeniedPrefix = "[DENIED]"
+
 // Verdict is CheckArgsVerdict's result. DefaultAsk marks an ask that came from
 // the final mode-default step (no rule matched, mode not plan) rather than from
 // an explicit ask rule — the only kind a hook's allow may skip.
@@ -997,7 +1000,7 @@ func NewGate(cfg PluginConfig) (*Gate, error) {
 			if v.Decision == DecisionDeny {
 				logf("DENY sid=%q tool=%s reason=%q", sid, t.Name(), v.Reason)
 				return map[string]any{
-					"output": fmt.Sprintf("[DENIED] %s: %s", t.Name(), v.Reason),
+					"output": fmt.Sprintf(DeniedPrefix+" %s: %s", t.Name(), v.Reason),
 				}, nil
 			}
 		}
@@ -1024,7 +1027,7 @@ func NewGate(cfg PluginConfig) (*Gate, error) {
 		case DecisionDeny:
 			logf("DENY sid=%q tool=%s reason=%q", sid, t.Name(), reason)
 			return map[string]any{
-				"output": fmt.Sprintf("[DENIED] %s: %s", t.Name(), reason),
+				"output": fmt.Sprintf(DeniedPrefix+" %s: %s", t.Name(), reason),
 			}, nil
 		case DecisionAllow:
 			logf("rule ALLOW sid=%q tool=%s reason=%q", sid, t.Name(), reason)
@@ -1039,7 +1042,7 @@ func NewGate(cfg PluginConfig) (*Gate, error) {
 						logf("auto judge error sid=%q tool=%s: %v", sid, t.Name(), jerr)
 						if nonInt {
 							return map[string]any{
-								"output": fmt.Sprintf("[DENIED] %s: auto mode could not judge this call", t.Name()),
+								"output": fmt.Sprintf(DeniedPrefix+" %s: auto mode could not judge this call", t.Name()),
 							}, nil
 						}
 					case av.Allow:

@@ -34,9 +34,11 @@ var callCapFreeTools = map[string]bool{
 	"list_skills": true, "load_skill": true, "load_skill_resource": true,
 }
 
+const callCapPrefix = "[CALL BUDGET REACHED]"
+
 // callCapNotice is returned in place of a tool result past the per-call cap.
 func callCapNotice(agentName string, limit int) string {
-	return fmt.Sprintf("[CALL BUDGET REACHED] %s may make at most %d tool calls per task, and this task has used them. "+
+	return fmt.Sprintf(callCapPrefix+" %s may make at most %d tool calls per task, and this task has used them. "+
 		"Do NOT call any more tools. Write your result now from what you have already gathered, "+
 		"and list what you could not check under open questions.", agentName, limit)
 }

@@ -19,5 +19,8 @@ type AutoJudge func(tc adk.ToolContext, toolName string, args map[string]any, cw
 
 // AutoBlockMessage is the tool output returned when auto mode blocks a call.
 func AutoBlockMessage(tool, reason string) string {
-	return fmt.Sprintf("[BLOCKED BY AUTO MODE] %s: %s. Try another approach that stays within the user's request, or ask the user.", tool, reason)
+	return fmt.Sprintf(AutoBlockPrefix+" %s: %s. Try another approach that stays within the user's request, or ask the user.", tool, reason)
 }
+
+// AutoBlockPrefix opens the tool output returned when auto mode blocks a call.
+const AutoBlockPrefix = "[BLOCKED BY AUTO MODE]"

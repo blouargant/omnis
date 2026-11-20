@@ -66,11 +66,18 @@ const (
 	choiceBudgetUnlimited = "Continue without a limit"
 )
 
+// Prefixes of the budget refusals; shared with the lesson classifier, which
+// must not treat them as tool failures.
+const (
+	budgetHaltPrefix = "[BUDGET REACHED]"
+	agentCapPrefix   = "[TOOL BUDGET REACHED]"
+)
+
 // budgetHaltNotice replaces the result of every tool call made after the user
 // stops the turn. It has to do two jobs: end the loop (the model must stop
 // calling tools) and salvage the work (it must answer with what it has rather
 // than apologise and give up), so it is phrased as an instruction, not an error.
-const budgetHaltNotice = "[BUDGET REACHED] The user stopped further research for this turn. " +
+const budgetHaltNotice = budgetHaltPrefix + " The user stopped further research for this turn. " +
 	"Do NOT call any more tools. Write your final answer now from the material you have already gathered, " +
 	"and state plainly which parts are unverified or incomplete."
 
@@ -78,7 +85,7 @@ const budgetHaltNotice = "[BUDGET REACHED] The user stopped further research for
 // per-turn cap. Like budgetHaltNotice it is phrased as an instruction rather than
 // an error: the agent must stop calling tools AND still deliver, from what it has.
 func agentCapNotice(agentName string) string {
-	return fmt.Sprintf("[TOOL BUDGET REACHED] %s has used its tool-call budget for this turn. "+
+	return fmt.Sprintf(agentCapPrefix+" %s has used its tool-call budget for this turn. "+
 		"Do NOT call any more tools. Produce your result now from the material you have already gathered, "+
 		"and state plainly what you were unable to verify.", agentName)
 }
