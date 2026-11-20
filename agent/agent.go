@@ -1133,6 +1133,8 @@ func NewAgent(ctx context.Context, opts Options) (*AgentResult, error) {
 		return nil, err
 	}
 	infra.installPluginHooks(inst)
+	lessonsOn := inst.Settings.LessonsEnabled
+	infra.Lessons.setEnabled(func() bool { return lessonsOn })
 	return assembleAgentResult(infra, inst), nil
 }
 

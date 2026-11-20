@@ -50,13 +50,25 @@ func NewManager(infra *Infrastructure, first *Instance) *Manager {
 		return nil
 	}
 	infra.installPluginHooks(first)
-	return &Manager{
+	m := &Manager{
 		infra:      infra,
 		currentGen: first.Generation,
 		genSeq:     first.Generation,
 		instances:  map[int]*managedInstance{first.Generation: {inst: first}},
 		sessionGen: map[string]int{},
 	}
+	// The lessons switch follows the CURRENT generation, so a hot-reload that
+	// turns lessons off also silences sessions draining on an older one.
+	if infra != nil {
+		infra.Lessons.setEnabled(func() bool {
+			if inst := m.Current(); inst != nil {
+				return inst.Settings.LessonsEnabled
+			}
+			on, ok := lessonsEnvSwitch()
+			return !ok || on
+		})
+	}
+	return m
 }
 
 // Infra exposes the underlying infrastructure (mailbox backend, registry,

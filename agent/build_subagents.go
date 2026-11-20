@@ -45,6 +45,7 @@ func buildSubAgents(
 	budgetBeforeTool llmagent.BeforeToolCallback,
 	budgetAfterModel llmagent.AfterModelCallback,
 	timeNoteBeforeModel llmagent.BeforeModelCallback,
+	lessonSvc *lessonService,
 ) (
 	map[string]adkagent.Agent,
 	[]adkagent.Agent,
@@ -59,7 +60,7 @@ func buildSubAgents(
 		}
 		filtered = append(filtered, cfg)
 	}
-	return buildSubAgentsFromConfigs(ctx, filtered, runtime, skillTS, leaderMCPHandles, pool, modelForAgent, callbacks, codeIdx, regIdx, docIdx, sessIdx, attestStore, steerStore, permGate, hooksBeforeTool, hooksAfterTool, budgetBeforeTool, budgetAfterModel, timeNoteBeforeModel)
+	return buildSubAgentsFromConfigs(ctx, filtered, runtime, skillTS, leaderMCPHandles, pool, modelForAgent, callbacks, codeIdx, regIdx, docIdx, sessIdx, attestStore, steerStore, permGate, hooksBeforeTool, hooksAfterTool, budgetBeforeTool, budgetAfterModel, timeNoteBeforeModel, lessonSvc)
 }
 
 // buildSubAgentsFromConfigs wires every passed-in agent configuration as a
@@ -108,6 +109,7 @@ func buildSubAgentsFromConfigs(
 	budgetBeforeTool llmagent.BeforeToolCallback,
 	budgetAfterModel llmagent.AfterModelCallback,
 	timeNoteBeforeModel llmagent.BeforeModelCallback,
+	lessonSvc *lessonService,
 ) (
 	subAgentMap map[string]adkagent.Agent,
 	subAgents []adkagent.Agent,
@@ -242,8 +244,16 @@ func buildSubAgentsFromConfigs(
 		// behind research_critic's 9.1M prompt tokens. Last in the chain, so a hook
 		// that rewrote the result is shaped too.
 		// The per-call cap's low-budget note rides on the shaped result (ADK stops
-		// at the first after-tool callback that returns one).
-		afterTool = append(afterTool, chainAfterTool(subAgentShaperCallback(), capHooks.Warn))
+		// at the first after-tool callback that returns one), and so does a lesson
+		// hint — added last, so the shaper never cuts it.
+		var lessonAfter llmagent.AfterToolCallback
+		if lessonsActive(runtime, cfg) {
+			lessonAfter = lessonSvc.AfterTool(cfg.Name)
+			if lb := lessonSvc.BeforeModel(cfg.Name); lb != nil {
+				beforeModel = append(beforeModel, lb)
+			}
+		}
+		afterTool = append(afterTool, chainAfterTool(chainAfterTool(subAgentShaperCallback(), capHooks.Warn), lessonAfter))
 
 		sa, sErr := agentkit.New(agentkit.AgentConfig{
 			Name:                  cfg.Name,

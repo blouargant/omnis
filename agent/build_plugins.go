@@ -125,8 +125,19 @@ func buildPlugins(
 	// dedup, universal output shaper). Mounted on answering roots only (the
 	// router never runs fs/edit tools); a no-op until a tool result is large,
 	// a re-read is identical, or an edit touches a file with a running LSP.
+	// Lesson hints ride inside this plugin, after the shaper (see
+	// codingEfficiencyPlugin), so they are never cut.
 	if !isRouterSquad {
-		if cep, cepClean, cerr := codingEfficiencyPlugin("coding_efficiency", lspMgr, bus); cerr == nil && cep != nil {
+		var lessonAfter llmagent.AfterToolCallback
+		if lessonsActive(runtime, rootCfg) {
+			lessonAfter = infra.Lessons.AfterTool(rootCfg.Name)
+			if lb := infra.Lessons.BeforeModel(rootCfg.Name); lb != nil {
+				if lp, lerr := plugin.New(plugin.Config{Name: "lessons", BeforeModelCallback: lb}); lerr == nil {
+					plugins = append(plugins, lp)
+				}
+			}
+		}
+		if cep, cepClean, cerr := codingEfficiencyPlugin("coding_efficiency", lspMgr, bus, lessonAfter); cerr == nil && cep != nil {
 			plugins = append(plugins, cep)
 			if cepClean != nil {
 				extraCleanups = append(extraCleanups, cepClean)
