@@ -1058,7 +1058,7 @@ leader-side `EventSubAgentStart/End` events keep the leader's `run_id`.
 | `core/agentkit/` | `New()` — thin ADK agent constructor |
 | `core/llm/` | Multi-provider dispatcher: `anthropic`, `openai`, `gemini`, `openai_compat` |
 | `core/embed/` | Text→vector embedder mirroring `core/llm`: `Embedder` iface, `Selection`, `NewWithSelection`; providers `openai`/`openai_compat`/`gemini` (anthropic ⇒ `ErrUnsupported`); L2-normalised output + content-hash on-disk cache. Powers all semantic recall |
-| `core/tools/` | File-system tools: `Read`, `Write`, `Grep`, `Glob`, `revert`, `Bash` (with safety floor). See "File tool robustness" for the per-file lock, normalized edit matching, Bash tail-keep + spill file, line-aware Read, the Pi-style Grep (`git grep`, match limit, line cap) and `RepairToolArgs` |
+| `core/tools/` | File-system tools: `Read`, `Write`, `Grep`, `Glob`, `revert`, `Bash` (with safety floor); the `Bash` tool reports each command's exit status to an optional observer (`SetBashExitObserver`, a side channel the agent lessons use). See "File tool robustness" for the per-file lock, normalized edit matching, Bash tail-keep + spill file, line-aware Read, the Pi-style Grep (`git grep`, match limit, line cap) and `RepairToolArgs` |
 | `core/permissions/` | Permission gating in Claude Code nomenclature: `permissions.{allow,ask,deny}` of `Tool(specifier)` rules, deny→ask→allow; auto-converts old `always_*` files |
 | `core/events/` | Event bus + file logger; before/after model/tool callbacks + session lifecycle. `FileLoggerWithOptions` composes each record into one `[]byte` and does a **single `f.Write`** (one `write(2)` to an `O_APPEND` fd is atomic against other appenders on POSIX, so a line can never be interleaved mid-record). The audit log is **process-wide — one file per build, ONE bus subscription**: it is owned by `Infrastructure.EventLog` ([agent/event_log.go](agent/event_log.go)), never by a squad/generation (see "Event audit log") |
 | `internal/tasks/` | Durable task graph; persisted to `logs/agent_tasks_<u>_<ts>.json` |
@@ -4472,30 +4472,59 @@ Idea taken from Harness² (google-research/harness2): its lesson shape (cue,
 lesson, evidence from the trajectory) and its rule that a hook reaches the model
 where prose can be skipped — not its offline replay of tasks.
 
-- **What counts as an error** ([agent/lessons_classify.go](agent/lessons_classify.go)
-  `classifyToolFailure`): a tool error (`err != nil`), a result map with a
-  non-empty `error`, a result string starting `Error`/`error `, or a
-  `[BLOCKED BY HOOK]` result. **Not** errors (decisions, not mistakes):
+- **Three outcomes per call** ([agent/lessons_classify.go](agent/lessons_classify.go)
+  `classifyToolCall` → `callFailed` / `callSucceeded` / `callNeither`).
+  **Failed:** a tool error (`err != nil`), a result map with a non-empty
+  `error`, a result string matching `^(Error|error)(:|\s+\S)` (`Error: …`,
+  `Error reading …`, `error: …`, `error fetching …` — not `Errors in …` nor
+  `ErrorHandler`), or a `[BLOCKED BY HOOK]` result. **Neither** (decisions, not
+  mistakes, and no proof the arguments work, since the call never ran):
   `permissions.DeniedPrefix`, `permissions.AutoBlockPrefix`, the budget halt,
   per-agent cap and per-call cap notices (`isDecisionRefusal`, the prefix
   constants are exported/shared, never hand copies), and a hook block the user
-  declined or that `dontAsk` / an unattended run refused.
+  declined or that `dontAsk` / an unattended run refused. A "neither" call opens
+  no episode, closes none, settles no pending hint and is not counted as `seen`:
+  counting a card the user denied as "the call that worked" would make the hint
+  replay the denied command. **Everything else succeeded.**
+- **Bash exit status** (a side channel, the model's text is unchanged):
+  `fstools.SetBashExitObserver` ([core/tools/bash_exit.go](core/tools/bash_exit.go))
+  is told each command's exit code / timeout by the `Bash` tool and the
+  read-only Bash (`runBashStatus`; `RunBash` returns the same string as before;
+  a command the safety floor or the read-only check refused before starting is
+  not reported). The lesson service installs it while lessons are on and removes
+  it while they are off (`syncBashObserver`, so a disabled service costs the
+  Bash tool one nil check), and stores the status on the call's recorded start
+  (`recordBashExit`; a call with no recorded start — an agent without lessons —
+  is ignored, so nothing accumulates). With a status, a Bash call that ran is
+  decided by it: non-zero or timed out ⇒ failed, its output as the error text;
+  **except exit 1** when the first word (`ToolKey`'s) is `grep`, `rg`, `egrep`,
+  `fgrep`, `diff`, `cmp`, `test` or `[` — their "no match" / "differs" answer —
+  which succeeded. Without a status (observer absent: CLI examples) the text
+  decides as for any tool. Why: `RunBash` returns a failing command's output
+  with no error marker, so `fatal: not a git repository` or a failing test run
+  used to read as a success — and could close an episode with arguments that
+  had failed. `bash_background` and `monitor` are not covered.
 - **Episode** ([agent/lessons_tracker.go](agent/lessons_tracker.go)
   `lessonTracker.observe`): one failure followed by a success of the **same tool
   key** by the same agent, in the same run (ADK invocation id) of the same
   user-facing session (`realSessionID`). Tool key = tool name, `Bash:<first word>`
   for Bash after wrapper stripping ([internal/lessons/signature.go](internal/lessons/signature.go)
   `ToolKey`/`firstWord`). Signature = sha256 of tool key + the error text
-  normalised (lower case; quoted strings, paths, UUIDs, hex ids, timestamps,
-  digits replaced by placeholders; first 200 chars); lesson id = its first 12 hex.
-  Repeated failures with the same signature count as attempts of one open
-  failure; the success closes it. Arguments are JSON capped at 2000 chars.
+  normalised (lower case; only the first 1600 chars are normalised; quoted
+  strings, then timestamps, then paths, UUIDs, hex ids, digits replaced by
+  placeholders; first 200 chars kept); lesson id = its first 12 hex. A path is
+  anything after a non-path character (start, space, `(`, `=`, `:`…) that is
+  absolute or `./`/`../`, relative with a directory (`src/main.go`), or a file
+  name with an extension (`prices.go`), so the same mistake on two files has one
+  signature (on CLI/TUI the fs tools print relative paths). Timestamps run before
+  hex/digit runs, or their digits would be split first. Repeated failures with
+  the same signature count as attempts of one open failure; the success closes
+  it. Arguments are JSON and the error text is kept, each capped at 2000 chars.
   Resolution through a **different tool** is not an episode (known limit).
 - **Writer** ([agent/lessons_writer.go](agent/lessons_writer.go)): a closed
   episode goes to a bounded queue (`lessonQueueCap` 64, dropped when full, one
   log line a minute) consumed by ONE worker goroutine on `Infrastructure.Lessons`
-  (`lessonService`, survives hot-reload, closed by `Infrastructure.Close`, which
-  waits `lessonCloseWait` ≈ 2 s). If a lesson already exists for (agent,
+  (`lessonService`, survives hot-reload, closed by `Infrastructure.Close`). If a lesson already exists for (agent,
   signature) the worker does nothing. Else one non-streamed call on
   `Manager.evalModel` (`eval_model_ref`, else the leader's model; reasoning off;
   20 s) with the failed arguments, error and working arguments, each fenced
@@ -4514,20 +4543,31 @@ where prose can be skipped — not its offline replay of tasks.
   the user's words); a lesson reaches only the agent that made the error and
   only on that tool, and every call it leads to still passes hooks, permissions
   and the Bash safety floor. **Secrets:** `episodeLooksSecret` drops an episode
-  whose failed/working arguments or error text match `lessonSecretRE`
-  (password/passwd/secret/token/api key/authorization followed by `=`/`:` —
-  also JSON `"password":"x"` and escaped quotes —, `bearer <8+>`, `sk-…`,
-  PEM private key header): never sent to the model, never stored. **Residual
-  risk, accepted:** the regex misses `--password x`, `AWS_SECRET_ACCESS_KEY=…`,
-  `access_key=`, `user:pass@host` URLs and `ghp_` tokens (and a false positive,
-  `token :=`, fails safe); a crafted error message can still bias the one-line
-  lesson — it cannot grant a permission.
+  whose failed/working arguments or error text match `lessonSecretRE`:
+  password/passwd/secret/token/api key/authorization followed by `=`/`:` (also
+  JSON `"password":"x"` and escaped quotes); a long flag `--password`/`--passwd`/
+  `--secret`/`--token`/`--api-key`/`--apikey` followed by a space and a value
+  (not `-p`, which is a port as often as a password); an environment-style name
+  ending in `_SECRET`/`_KEY`/`_TOKEN`/`_PASSWORD` followed by `=`;
+  `user:password@host` in a URL; `bearer <8+>`, `sk-…`, `ghp_`/`gho_`/
+  `github_pat_` tokens, a PEM private key header. Such an episode is never sent
+  to the model, never stored. `export GOFLAGS=-mod=mod`, `git push origin main`,
+  `kubectl get pods -n demo`, `/src/tokenizer.go` pass. **Residual risk,
+  accepted:** a secret in a shape not listed (a bare positional password, a
+  short flag) is missed; a false positive (`token :=`, `old_key=1`) fails safe;
+  a crafted error message can still bias the one-line lesson — it cannot grant a
+  permission.
 - **Storage** ([internal/lessons/](internal/lessons/), stdlib + `internal/paths`
   only): `<root>/lessons/<agent>/<id>.md`, front matter + cue/text + two fenced
   excerpts (failed, worked), per-directory lock, atomic write. `<root>` =
   `$OMNIS_HOME` (`paths.ConfigWriteDir()`), or the session owner's
-  `users/<login>/` in cookie mode (`lessonService.rootFor` → `collectionRoot`;
-  the routes use `userRoot(requestLogin(c))`). Counters: `seen`, distinct
+  `users/<login>/` in cookie mode (`lessonService.rootFor` →
+  `collectionRootResolved`; the routes use `userRoot(requestLogin(c))`). When a
+  per-user root resolver is installed but cannot name the session's owner (a
+  session deleted mid-turn), lessons do **nothing** for that call — no read, no
+  write, no hint — rather than fall back to the shared root, which every other
+  unattributable session would share and which holds tool arguments. With no
+  resolver (single-user, identity-header mode) the shared root is the default. Counters: `seen`, distinct
   `sessions` (last 8 kept), `hinted`, `recovered`, `repeated`, `seen_in_prompt`,
   the last 5 hint `outcomes`, `promoted_seen`, `prompt_failed`.
 - **Two delivery paths.**
@@ -4542,7 +4582,12 @@ where prose can be skipped — not its offline replay of tasks.
      after fusion → dedup → shaper, so the hint is never cut,
      [agent/coding_efficiency_plugin.go](agent/coding_efficiency_plugin.go) +
      [agent/build_plugins.go](agent/build_plugins.go)). A before-tool callback
-     (`BeforeTool`) records each call's start time on the same two paths.
+     (`BeforeTool`) records each call's start time **before the hooks,
+     permission and budget callbacks**: on a sub-agent it rides in the events
+     slot, on a root it is its own runner plugin `lessons_start`, mounted
+     **first** in `buildPlugins` (non-router, lessons active). Stamped after a
+     card or a validation hook, a call that waited could close a sibling's
+     failure it never benefited from. It always returns nil, nil.
   2. **Prompt** — a before-model callback (`BeforeModel`) appends the
      `<agent-lessons>` block (header + one `- cue → lesson` per prompt lesson,
      budget `PromptBudgetChars` 1500, [internal/lessons/render.go](internal/lessons/render.go)
@@ -4573,9 +4618,12 @@ where prose can be skipped — not its offline replay of tasks.
   per agent `"lessons": false` in `agent.json` (`RuntimeAgentConfig.Lessons`,
   surfaced by the config GET only when off). Callbacks are mounted only when
   `lessonsActive(runtime, cfg)` (decided from the settings being BUILT, never
-  from the current generation) **and** each call re-checks `isEnabled()` against
-  the CURRENT generation (`NewManager` → `setEnabled`), so a reload that turns
-  lessons off silences sessions draining on an older generation. The router's
+  from the current generation) **and** each call re-checks `isEnabled()` — one
+  atomic load of a flag the Manager sets from the CURRENT generation whenever
+  it changes (`NewManager`, `Reload` after promotion, `repairCurrentLocked` →
+  `syncLessonsSwitchLocked` → `setEnabledValue`; `NewAgent` too) — so a reload
+  that turns lessons off silences sessions draining on an older generation,
+  without taking the Manager's mutex on every tool and model call. The router's
   agent has the toggle but lessons never apply there.
 - **Settings and routes**: Settings → Agents → an agent → **Lessons**
   ([web/settings.js](web/settings.js)): read-only list (state badge, tool,
@@ -4616,18 +4664,24 @@ where prose can be skipped — not its offline replay of tasks.
     chain** before the hint (ADK stops at the first plugin returning a result),
     so that result gets no hint. Sub-agents are not affected.
   - **A hint followed by a failure with a different signature settles neither
-    `recovered` nor `repeated`**; the pending hint stays until the same tool
-    succeeds or repeats the error, or is evicted (bounded at 1024).
-  - **CLI one-shot:** `Close` waits ≈ 2 s for the worker, so an episode closed
-    at the very end of the turn (and its model call) can be lost.
+    `recovered` nor `repeated`**, and that call **drops** the pending hint: only
+    the next call of the tool that ran (started after the hint) decides it. A
+    refused call never reaches `settleOutcome`, so it leaves the hint pending;
+    an unsettled hint is evicted at 1024.
+  - **`Close` stops the writer at once:** it cancels the worker's context —
+    aborting an in-flight writer model call — then waits at most
+    `lessonCloseWait` (≈ 2 s) for the goroutine to return; queued episodes are
+    dropped. On a CLI one-shot, an episode closed at the very end of the turn
+    is lost.
   - The per-sub-agent shaper must stay before the hint (`chainAfterTool` order);
     ADK stops at the first after-tool callback that returns a result.
 - **Known limits:** same-tool resolution only; one lesson per (agent,
   signature) — no sharing between agents; no learning without an error (a wrong
   answer nobody flagged goes to collection memory); a one-line lesson can still
-  be biased by a crafted error message (see residual risk). Also: the secret regex has the gaps listed
-  above; a successful result whose text merely starts with `Error` (e.g.
-  `Errors in …`) is read as an error; `firstWord` skips `sudo`/`env`/`timeout`/
+  be biased by a crafted error message (see residual risk). Also: the secret
+  regex has the gaps listed above; a Bash call without a reported exit status
+  (CLI examples, `bash_background`, `monitor`) is judged on its text;
+  `firstWord` skips `sudo`/`env`/`timeout`/
   `nice`/`nohup`/`time` but not their flags, so `sudo -u bob kubectl` has tool
   key `Bash:-u`. The shipped lifecycle constants are untuned: revisit them with
   the lessons bench in omnis-benches (`squad-bench/tasks-lessons.json`).

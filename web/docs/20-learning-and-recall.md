@@ -37,11 +37,16 @@ the same tool again correctly, Omnis stores a one-line lesson for that agent
 to approve it, and no question or card is ever shown.
 
 - **When one is learned** — only after an error followed by a success of the
-  same tool, in the same run. A failure the agent never recovered from, a
-  refusal you made on a permission card, a permission rule, a budget notice or a
-  Stop never create a lesson. A small model judges whether the error teaches
-  something general; a one-off typo or a transient failure writes nothing.
-  Episodes that look like they contain a password or a token are dropped.
+  same tool, in the same run. For a shell command, an error is a non-zero exit
+  status (except `grep`, `diff`, `test` and similar commands answering "no
+  match" with status 1). A failure the agent never recovered from never creates
+  a lesson. A refusal — yours on a permission card, a permission rule, an
+  auto-mode block, a budget notice — is neither an error nor a success: it never
+  creates a lesson, and a call you refused is never recorded as "the arguments
+  that worked". A small model judges whether the error teaches something
+  general; a one-off typo or a transient failure writes nothing. Episodes that
+  look like they contain a password or a token (`--password x`,
+  `API_KEY=…`, `user:pass@host`, GitHub tokens…) are dropped.
 - **How it comes back** — the next time the same error appears for that agent,
   a note is added to the error: the lesson and the arguments that worked then.
   A lesson that keeps recurring (three times, in at least two chats) is
@@ -55,7 +60,8 @@ to approve it, and no question or card is ever shown.
   at least one lesson; the **Learn from errors** toggle is always there.
 - **Scope** — a lesson belongs to the agent that made the error and applies
   only to that tool. Lessons are stored under `$OMNIS_HOME/lessons/<agent>/`
-  (per user on a shared server).
+  (per user on a shared server; a chat whose owner cannot be identified gets
+  no lesson behaviour at all rather than the shared folder).
 - **Switching it off** — for one agent, turn off **Learn from errors** in its
   settings; for everything, set `OMNIS_LESSONS=false` or `lessons: {"enabled":
   false}` in `agents.json`. Off, nothing is added to any prompt or error.

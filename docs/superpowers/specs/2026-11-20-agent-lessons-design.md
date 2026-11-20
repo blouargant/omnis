@@ -74,13 +74,22 @@ replay of the task with candidate harnesses.
 Observed by the host, per tool call:
 
 - a tool result that is an error (`EventToolError`, a result string starting
-  with `Error`/`error `, or a result map with a non-empty `error`);
+  with `Error:`, `Error <text>`, `error:` or `error <text>` — not `Errors in…`
+  nor `ErrorHandler` —, or a result map with a non-empty `error`);
+- a `Bash` command that exited non-zero or timed out (the exit status reaches
+  the host through a side channel, `fstools.SetBashExitObserver`; the text the
+  model sees is unchanged), except exit status 1 from `grep`, `rg`, `egrep`,
+  `fgrep`, `diff`, `cmp`, `test` or `[`, which is their "no match" / "differs"
+  answer. A Bash call with no reported status is judged on its text;
 - a call blocked by a hook (`[BLOCKED BY HOOK]`).
 
-Not counted: a user's deny on a permission card, a permission `deny` rule, an
-auto-mode block, a budget or cap notice, a Stop, and a hook block the user
-declined or that `dontAsk` or an unattended run refused. These are decisions,
-not mistakes to learn around.
+A call is then one of three things: failed, succeeded, or **neither**. Neither:
+a user's deny on a permission card, a permission `deny` rule, an auto-mode
+block, a budget or cap notice, and a hook block the user declined or that
+`dontAsk` or an unattended run refused. These are decisions, not mistakes to
+learn around, and the call never ran, so it proves nothing about its
+arguments: it opens no episode, closes none, settles no pending hint and is not
+counted as an occurrence.
 
 ### 2. The episode
 
@@ -95,9 +104,12 @@ later call of that tool that succeeded. Without a success there is no episode.
 
 - **Tool key**: the tool name; for `Bash`, `Bash:<first word of the command>`
   after wrapper stripping (`kubectl`, `git`, …).
-- **Signature**: tool key + the error text normalised (lower case; paths,
-  numbers, timestamps, quoted strings, hex ids replaced by placeholders;
-  whitespace collapsed; first 200 chars), hashed. Lessons are keyed by (agent,
+- **Signature**: tool key + the error text normalised (lower case; quoted
+  strings, timestamps, paths, UUIDs, hex ids and numbers replaced by
+  placeholders, timestamps before hex and digit runs; whitespace collapsed;
+  first 200 chars), hashed. A path is absolute or `./`/`../`, relative with a
+  directory, or a file name with an extension, after any non-path character
+  (`(`, `=`, `:`…), so the same mistake on two files gives one signature. Lessons are keyed by (agent,
   signature); the lesson id is the first 12 hex characters.
 
 No episode is recorded in a turn where memory is read-only (`memoryReadOnly`):
@@ -143,7 +155,11 @@ So:
 - An episode whose failed or working arguments, or error text, match a secret
   pattern is dropped before any model call: password/passwd/secret/token/
   api key/authorization followed by `=` or `:` (JSON-shaped and escaped quotes
-  included), `bearer <token>`, `sk-…` keys, a PEM private key header. Fence
+  included), `--password`/`--passwd`/`--secret`/`--token`/`--api-key`/`--apikey`
+  followed by a value, an environment-style name ending in `_SECRET`, `_KEY`,
+  `_TOKEN` or `_PASSWORD` followed by `=`, `user:password@host` in a URL,
+  `bearer <token>`, `sk-…` keys, `ghp_`/`gho_`/`github_pat_` tokens, a PEM
+  private key header. Fence
   markers inside the data sent to the writer are neutralised so it cannot close
   its own fence.
 - A lesson reaches only the agent that made the error, on that tool. Every call
@@ -154,15 +170,16 @@ So:
 
 Residual risk, accepted: a crafted error message can still bias the one-line
 lesson. It cannot grant a permission. The secret patterns are not exhaustive
-(`--password x`, `AWS_SECRET_ACCESS_KEY=…`, `user:pass@host`, `ghp_` tokens are
-not matched).
+(a bare positional password or a short flag such as `-p x` is not matched).
 
 ### 5. Storage
 
 `internal/lessons` (stdlib only, like `internal/collmem`): one file per lesson
 under `<root>/lessons/<agent>/<id>.md`, front matter + body, per-directory lock,
 atomic write. `<root>` is `$OMNIS_HOME`, or the session owner's
-`users/<login>/` in cookie mode (arguments may hold a user's paths).
+`users/<login>/` in cookie mode (arguments may hold a user's paths). In cookie
+mode, a session whose owner cannot be resolved gets no lesson behaviour at all
+for that call (no read, no write, no hint) rather than the shared root.
 
 Fields: `agent`, `tool`, `signature`, `cue`, `lesson`, `failed` (excerpt),
 `worked` (the arguments), `state` (`hint` | `prompt` | `retired`), `created`,
@@ -258,5 +275,8 @@ the existing benches with lessons on.
   extracted (reuse the permissions wrapper stripping if it is exported).
 - The file format details and the id scheme.
 - Where the root's callbacks sit relative to the coding-efficiency plugin, as
-  long as the hint is added after the shaper.
+  long as the hint is added after the shaper. (Built: the hint rides in that
+  plugin; the start-time recorder is its own plugin mounted first, ahead of the
+  hooks, permission and budget plugins, as it is in the events slot on
+  sub-agents.)
 - The wording of the writer prompt and of the block header.
