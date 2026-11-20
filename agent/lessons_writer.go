@@ -188,7 +188,9 @@ func (s *lessonService) takeRunSlot(k runCountKey, now time.Time) bool {
 	return true
 }
 
-var lessonSecretRE = regexp.MustCompile(`(?i)authorization:\s*bearer|api[_-]?key\s*[=:]|password\s*[=:]|secret\s*[=:]|token\s*[=:]|sk-\w{16,}|-----BEGIN [A-Z ]*PRIVATE KEY-----`)
+// The key word may be followed by a quote (JSON: "password":"x") or an escaped
+// quote (a command inside JSON) before the separator.
+var lessonSecretRE = regexp.MustCompile(`(?i)(?:password|passwd|secret|token|api[_-]?key|authorization)\\?["']?\s*[=:]|bearer\s+\S{8,}|sk-\w{16,}|-----BEGIN [A-Z ]*PRIVATE KEY-----`)
 
 // episodeLooksSecret reports whether an episode may carry a credential: such an
 // episode is never sent to a model nor stored.
@@ -208,7 +210,12 @@ const lessonWriterSystemPrompt = "You write one-line lessons for an AI agent tha
 	"CUE: <a short phrase naming the situation in which the error happens>\n" +
 	"LESSON: <one sentence saying how to call the tool to avoid the error>"
 
+var fenceNeutraliser = strings.NewReplacer("<<<", "‹‹‹", ">>>", "›››")
+
+// lessonFence wraps a body between BEGIN/END lines. Fence markers inside the
+// body are neutralised so it cannot close its own fence or forge another.
 func lessonFence(name, body string) string {
+	body = fenceNeutraliser.Replace(body)
 	return "<<<BEGIN " + name + ">>>\n" + body + "\n<<<END " + name + ">>>\n"
 }
 
