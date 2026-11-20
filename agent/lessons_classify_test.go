@@ -119,6 +119,14 @@ func TestBashExitStatusDecidesABashCall(t *testing.T) {
 		{"grep piped to kubectl", "grep x f | kubectl apply -f -", "error: no objects passed to apply", bashExit{code: 1}, callFailed},
 		{"kubectl piped to bad grep", "kubectl get pods | grep -E '('", "grep: Unmatched ( or \\(", bashExit{code: 2}, callFailed},
 		{"quoted pipe, false last", `echo "a | grep b"; false`, "a | grep b", bashExit{code: 1}, callFailed},
+		// The last segment did not necessarily produce the status or the output.
+		{"cd fails before grep", "cd /wrong && grep x f", "sh: 1: cd: can't cd to /wrong", bashExit{code: 1}, callNeither},
+		{"kubectl error piped to grep", "kubectl get pods --context bad | grep foo", "error: dial tcp: connection refused", bashExit{code: 1}, callNeither},
+		{"kubectl piped to grep, empty", "kubectl get pods | grep foo", "", bashExit{code: 1}, callSucceeded},
+		{"grep no match, empty", "grep nomatch file", "", bashExit{code: 1}, callSucceeded},
+		{"diff alone with a diff", "diff a b", "1c1\n< a\n---\n> b", bashExit{code: 1}, callSucceeded},
+		{"diff in a pipe with output", "cat a | diff - b", "1c1\n< a\n---\n> b", bashExit{code: 1}, callNeither},
+		{"grep in a substitution", "kubectl apply -f $(ls | grep yaml)", "error: no objects passed to apply", bashExit{code: 1}, callNeither},
 		// A failure with nothing to learn from is neither.
 		{"quoted pipe, false last, no output", `echo -n ""; false`, "(no output)", bashExit{code: 1}, callNeither},
 		{"bare exit status", "false", "Error: exit status 1", bashExit{code: 1}, callNeither},

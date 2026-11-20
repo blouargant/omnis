@@ -300,3 +300,19 @@ func TestClosingOneServiceKeepsAnotherServicesBashObserver(t *testing.T) {
 		t.Fatalf("a closed service still observes: %+v", exit)
 	}
 }
+
+// A kubectl failure followed by the same failure piped into grep (grep exits 1,
+// the kubectl error is in the output) closes no episode: the pipe did not work.
+func TestFailingCommandPipedToGrepClosesNoEpisode(t *testing.T) {
+	lessonEnv(t)
+	s := newLessonService(nil)
+	stopLessonWorker(s)
+	run := newLessonCtx("s1", "inv1")
+	const out = "error: context \"bad\" does not exist"
+	bashCall(s, run.withCall("1"), "kubectl get pods --context bad", out, 1)
+	time.Sleep(time.Millisecond)
+	bashCall(s, run.withCall("2"), "kubectl get pods --context bad | grep foo", out, 1)
+	if eps := drainEpisodes(s); len(eps) != 0 {
+		t.Fatalf("a failing pipe closed the episode: %+v", eps)
+	}
+}
