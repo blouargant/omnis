@@ -133,11 +133,6 @@ func buildPlugins(
 		if lessonsActive(runtime, rootCfg) {
 			lessonBefore = infra.Lessons.BeforeTool(rootCfg.Name)
 			lessonAfter = infra.Lessons.AfterTool(rootCfg.Name)
-			if lb := infra.Lessons.BeforeModel(rootCfg.Name); lb != nil {
-				if lp, lerr := plugin.New(plugin.Config{Name: "lessons", BeforeModelCallback: lb}); lerr == nil {
-					plugins = append(plugins, lp)
-				}
-			}
 		}
 		if cep, cepClean, cerr := codingEfficiencyPlugin("coding_efficiency", lspMgr, bus, lessonBefore, lessonAfter); cerr == nil && cep != nil {
 			plugins = append(plugins, cep)
@@ -167,6 +162,15 @@ func buildPlugins(
 	// workstream framing sits outermost, project specifics next.
 	if col, err := collectionCtxPlugin("collection_ctx", isRouterSquad); err == nil {
 		plugins = append(plugins, col)
+	}
+	// An agent's promoted lessons, appended to the root's system instruction
+	// (answering roots only; no prompt lesson ⇒ the request is untouched).
+	if !isRouterSquad && lessonsActive(runtime, rootCfg) {
+		if lb := infra.Lessons.BeforeModel(rootCfg.Name); lb != nil {
+			if lp, lerr := lessonsPlugin("lessons", lb); lerr == nil {
+				plugins = append(plugins, lp)
+			}
+		}
 	}
 	if cmp, _, _, err := compress.PluginWithTools("compress", compress.Config{
 		// Per-session audit file so concurrent users / sessions

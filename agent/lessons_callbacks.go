@@ -12,9 +12,13 @@ import (
 	"time"
 
 	"google.golang.org/adk/v2/agent/llmagent"
+	"google.golang.org/adk/v2/model"
+	"google.golang.org/adk/v2/plugin"
 	"google.golang.org/adk/v2/tool"
+	"google.golang.org/genai"
 
 	"github.com/blouargant/omnis/core/adk"
+	"github.com/blouargant/omnis/core/events"
 	"github.com/blouargant/omnis/internal/lessons"
 	"github.com/blouargant/omnis/internal/paths"
 )
@@ -25,6 +29,8 @@ const (
 	lessonQueueCap = 64
 	// lessonHintKey is the result key the hint is added under.
 	lessonHintKey = "lesson"
+	// lessonsBlockTag opens the prompt block (see lessons.PromptBlock).
+	lessonsBlockTag = "<agent-lessons>"
 	// lessonPendingMax bounds the hints waiting for their outcome.
 	lessonPendingMax = 1024
 	// lessonStartsMax and lessonStartTTL bound the recorded call start times: a
@@ -289,9 +295,72 @@ func (s *lessonService) takeStart(k callKey, fallback time.Time) time.Time {
 }
 
 // BeforeModel returns the before-model callback that puts an agent's prompt
-// lessons in its system instruction. Inert for now.
+// lessons in its system instruction. nil receiver ⇒ nil callback. The block
+// goes in the system instruction only, never a user-role content; a disabled
+// service or an agent with no prompt lesson leaves the request untouched.
 func (s *lessonService) BeforeModel(agent string) llmagent.BeforeModelCallback {
-	return nil
+	if s == nil || agent == "" {
+		return nil
+	}
+	return func(ctx adk.CallbackContext, req *model.LLMRequest) (resp *model.LLMResponse, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("lessons: before-model callback of %s recovered from a panic: %v", agent, r)
+				resp, err = nil, nil
+			}
+		}()
+		if ctx == nil || req == nil || !s.isEnabled() {
+			return nil, nil
+		}
+		sid := steerSessionID(ctx)
+		if sid == "" {
+			sid = events.RootSessionFromContext(ctx)
+		}
+		if sid == "" {
+			sid = ctx.SessionID()
+		}
+		appendLessonBlock(req, s.storeFor(sid).PromptBlock(agent, s.now()))
+		return nil, nil
+	}
+}
+
+// appendLessonBlock appends the lessons block at the end of the request's system
+// instruction, after a blank line. An empty block, or a request that already
+// carries one, is left alone.
+func appendLessonBlock(req *model.LLMRequest, block string) {
+	if block == "" || req == nil {
+		return
+	}
+	if req.Config == nil {
+		req.Config = &genai.GenerateContentConfig{}
+	}
+	si := req.Config.SystemInstruction
+	if si != nil {
+		for _, p := range si.Parts {
+			if p != nil && strings.Contains(p.Text, lessonsBlockTag) {
+				return
+			}
+		}
+	}
+	part := &genai.Part{Text: "\n\n" + block}
+	if si == nil {
+		req.Config.SystemInstruction = &genai.Content{Parts: []*genai.Part{part}}
+		return
+	}
+	si.Parts = append(si.Parts, part)
+}
+
+// lessonsPlugin is the runner plugin carrying the before-model callback on a
+// squad root.
+func lessonsPlugin(name string, cb llmagent.BeforeModelCallback) (*plugin.Plugin, error) {
+	return plugin.New(plugin.Config{Name: name, BeforeModelCallback: cb})
+}
+
+// logLessonState logs one line when a lesson changed state. Never its content.
+func logLessonState(agent, id string, old, now lessons.State) {
+	if old != now {
+		log.Printf("lessons: %s %s %s -> %s", agent, id, old, now)
+	}
 }
 
 func (s *lessonService) afterTool(agent string, tc adk.ToolContext, name string, args, result map[string]any, err error) map[string]any {
@@ -318,6 +387,15 @@ func (s *lessonService) afterTool(agent string, tc adk.ToolContext, name string,
 		return nil
 	}
 	l, ok := store.Find(agent, sig)
+	if ok && record {
+		// Count the occurrence first so the hint reflects the lesson's state now.
+		if seen, found, serr := store.RecordSeen(agent, sig, sid, s.now()); serr != nil {
+			log.Printf("lessons: count occurrence of %s for %s: %v", l.ID, agent, serr)
+		} else if found {
+			logLessonState(agent, l.ID, l.State, seen.State)
+			l = seen
+		}
+	}
 	if !ok || l.State == lessons.StateRetired {
 		return nil
 	}
@@ -347,9 +425,13 @@ func (s *lessonService) settleOutcome(store *lessons.Store, k runKey, toolKey st
 	if !ok || (failed && sig != p.sig) {
 		return
 	}
-	if _, err := store.RecordOutcome(k.agent, p.id, !failed); err != nil {
+	old, _ := store.Find(k.agent, p.sig)
+	l, err := store.RecordOutcome(k.agent, p.id, !failed)
+	if err != nil {
 		log.Printf("lessons: record outcome of %s for %s: %v", p.id, k.agent, err)
+		return
 	}
+	logLessonState(k.agent, p.id, old.State, l.State)
 }
 
 func (s *lessonService) setPending(k runKey, toolKey, id, sig string, at time.Time) {

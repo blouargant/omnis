@@ -244,9 +244,6 @@ func TestDisabledIsInert(t *testing.T) {
 	if out != nil || err != nil {
 		t.Fatalf("disabled service delivered %v %v", out, err)
 	}
-	if s.BeforeModel("coder") != nil {
-		t.Fatal("BeforeModel is inert in this task")
-	}
 	var nilSvc *lessonService
 	if nilSvc.AfterTool("coder") != nil || nilSvc.BeforeModel("coder") != nil {
 		t.Fatal("a nil service must give nil callbacks")
