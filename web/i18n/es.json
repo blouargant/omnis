@@ -1118,5 +1118,6 @@
   "slash.mode": "Mostrar o fijar el modo de permisos de esta sesión",
   "set.perm.sessionHint": "Cada chat puede reemplazar este modo (indicador sobre el compositor, Mayús+Tab o /mode).",
   "picker.permissions": "Permisos",
-  "picker.permissionsAria": "Modo de permisos del nuevo chat"
+  "picker.permissionsAria": "Modo de permisos del nuevo chat",
+  "set.agent.configWarnings": "Problemas de configuración (ignorados para que el servidor pueda arrancar):"
 }

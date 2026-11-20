@@ -6849,6 +6849,16 @@ Rules enforced at resolution time:
   requires **exactly one member** (it runs directly as the root — see
   "Leaderless squads" above); the member need not be `leader: true`.
 - Duplicate squad names are rejected.
+- **None of these rules fails the configuration.** `resolveSquadEntries`
+  ([agent/runtime_config.go](agent/runtime_config.go)) drops the offending
+  squad (bad leader, empty/duplicate name, leaderless without exactly one
+  enabled member) or just the offending member, logs it, and records it in
+  `RuntimeSettings.ConfigWarnings`; `GET /api/config/parsed/agent` returns them
+  as `warnings` and Settings → Agents shows them in a banner. Typical case: a
+  user overlay still naming the agents of a Claude Code plugin since
+  uninstalled (`squad "iaparc" leader "iaparc_lead" is not an enabled agent`
+  used to stop the server at boot). Other resolution errors (subagent graph,
+  inline `models`) stay fatal.
 
 The web UI exposes a Squads sub-tab under Settings → Agent with a leader
 dropdown (including a `(none — run single agent directly)` option that

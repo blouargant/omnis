@@ -773,8 +773,10 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 		// Special handling for agent config: resolve agents from the registry
 		// and return the full RuntimeSettings so the UI sees the resolved
 		// agent definitions, not just the names from config/agents.json.
+		var configWarnings []string
 		if name == "agent" && parsed != nil {
 			settings, err := agent.ResolveRuntimeSettings(agent.Options{ConfigPathStrict: true})
+			configWarnings = settings.ConfigWarnings
 			// A resolve failure must NOT be swallowed. `parsed` then still holds
 			// the RAW agents value from agents.json — a list of NAMES, not agent
 			// objects — which the editor renders as a fleet of "(unnamed)" rows
@@ -931,11 +933,17 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 		if st != nil {
 			mtime = st.ModTime()
 		}
-		c.JSON(http.StatusOK, gin.H{
+		resp := gin.H{
 			"name":  name,
 			"data":  parsed,
 			"mtime": mtime,
-		})
+		}
+		// Problems the resolver worked around (a squad dropped because its
+		// leader no longer exists…), so Settings can say why a squad is gone.
+		if len(configWarnings) > 0 {
+			resp["warnings"] = configWarnings
+		}
+		c.JSON(http.StatusOK, resp)
 	})
 
 	rg.PUT("/config/parsed/:name", func(c *gin.Context) {

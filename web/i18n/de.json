@@ -1118,5 +1118,6 @@
   "slash.mode": "Berechtigungsmodus dieser Sitzung anzeigen oder setzen",
   "set.perm.sessionHint": "Jeder Chat kann diesen Modus überschreiben (Anzeige über dem Eingabefeld, Umschalt+Tab oder /mode).",
   "picker.permissions": "Berechtigungen",
-  "picker.permissionsAria": "Berechtigungsmodus für den neuen Chat"
+  "picker.permissionsAria": "Berechtigungsmodus für den neuen Chat",
+  "set.agent.configWarnings": "Konfigurationsprobleme (ignoriert, damit der Server starten kann):"
 }

@@ -368,3 +368,15 @@
 }
 
 
+
+/* Configuration problems the server worked around (e.g. a squad dropped
+   because its leader is no longer an enabled agent). */
+.settings-config-warnings {
+  font-size: 0.85rem;
+  margin: 0.5rem 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--warning, #e0a100);
+  background: color-mix(in srgb, var(--warning, #e0a100) 10%, transparent);
+  border-radius: var(--radius-sm, 4px);
+}
+.settings-config-warnings ul { margin: 0.25rem 0 0; padding-left: 1.2rem; }

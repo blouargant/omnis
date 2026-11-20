@@ -934,7 +934,8 @@ const BASE_PATH = window.BASE_PATH || "";
     if (!r.ok) throw new Error(await errText(r));
     const j = await r.json();
     const data = j.data == null ? defaultDataFor(id) : j.data;
-    state.parsed[id] = { data, mtime: j.mtime, dirty: false, value: deepClone(data) };
+    state.parsed[id] = { data, mtime: j.mtime, dirty: false, value: deepClone(data),
+      warnings: Array.isArray(j.warnings) ? j.warnings : [] };
   }
 
   // loadBuiltinAgents fetches the embedded default description + system
@@ -1600,6 +1601,11 @@ const BASE_PATH = window.BASE_PATH || "";
             <button type="button" data-subtab="${t.id}" class="${sub === t.id ? "active" : ""}">${escHtml(t.label)}</button>
           `).join("")}
         </div>
+        ${(state.parsed[id].warnings || []).length ? `
+          <div class="settings-config-warnings" role="status">
+            <strong>${escHtml(tr("set.agent.configWarnings"))}</strong>
+            <ul>${state.parsed[id].warnings.map(w => `<li>${escHtml(w)}</li>`).join("")}</ul>
+          </div>` : ""}
         <div class="settings-subtab-body"></div>
       </div>
     `;

@@ -343,7 +343,7 @@ func TestFailedResolutionKeepsPublishedPluginState(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(sys, "agents.json"),
 		`{"agents": ["leader"], "router_squad": "none", "disabled_plugins": ["demo"],
-		  "squads": [{"name": "bad", "leader": "leader", "members": ["ghost"]}]}`)
+		  "models": {"inline": {"model": "x"}}}`)
 	if _, err := ResolveRuntimeSettings(Options{}); err == nil {
 		t.Fatal("the resolution was expected to fail")
 	}

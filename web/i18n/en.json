@@ -1118,5 +1118,6 @@
   "slash.mode": "Show or set this session's permission mode",
   "set.perm.sessionHint": "Each chat can override this mode (pastille above the composer, Shift+Tab or /mode).",
   "picker.permissions": "Permissions",
-  "picker.permissionsAria": "Permission mode for the new chat"
+  "picker.permissionsAria": "Permission mode for the new chat",
+  "set.agent.configWarnings": "Configuration problems (ignored so the server can run):"
 }

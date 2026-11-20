@@ -71,25 +71,37 @@ func parsedAgentData(t *testing.T, body string) map[string]any {
 	return resp.Data
 }
 
-// A squad that cannot resolve (leader is not an enabled agent) must surface as
-// an explicit error. Before the fix the resolve error was swallowed and the
-// handler returned the RAW agents value — a list of NAMES — which the editor
-// rendered as a fleet of "(unnamed)" rows.
-func TestParsedAgentInvalidConfigReturnsError(t *testing.T) {
+// A squad that cannot resolve (leader is not an enabled agent) must not break
+// the editor: the GET still returns resolved agent OBJECTS (never the raw list
+// of names, which the editor renders as "(unnamed)" rows and whose save wipes
+// every agent overlay) and reports the dropped squad as a warning.
+func TestParsedAgentInvalidSquadIsAWarning(t *testing.T) {
 	sys, _ := agentLayersSetup(t)
 	seedTwoAgentFleet(t, sys, `{"agents":["leader","helper"],"squads":[{"name":"System","leader":"leader","members":["helper"]},{"name":"Fleet","leader":"conductor","members":[]}]}`)
 
 	r := newTestEngine(t, editorFiles())
 	w := do(t, r, http.MethodGet, "/api/config/parsed/agent", nil)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("want 400 for an unresolvable config, got %d body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "conductor") {
-		t.Fatalf("error must name the offending agent, got %s", w.Body.String())
+	var resp struct {
+		Warnings []string       `json:"warnings"`
+		Data     map[string]any `json:"data"`
 	}
-	// The name list must never reach the client as the `agents` payload.
-	if strings.Contains(w.Body.String(), `"data"`) {
-		t.Fatalf("must not return config data on a resolve error: %s", w.Body.String())
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Warnings) == 0 || !strings.Contains(strings.Join(resp.Warnings, " "), "conductor") {
+		t.Fatalf("warnings must name the missing leader, got %v", resp.Warnings)
+	}
+	agents, _ := resp.Data["agents"].([]any)
+	if len(agents) == 0 {
+		t.Fatalf("agents missing: %v", resp.Data["agents"])
+	}
+	for _, a := range agents {
+		if _, ok := a.(map[string]any); !ok {
+			t.Fatalf("agents must be resolved objects, got %v", resp.Data["agents"])
+		}
 	}
 }
 

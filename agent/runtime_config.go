@@ -380,6 +380,10 @@ const DefaultSquadName = "system"
 // RuntimeSettings is the merged runtime configuration after precedence
 // resolution: defaults -> JSON -> ENV -> Options.
 type RuntimeSettings struct {
+	// ConfigWarnings lists configuration problems that were worked around
+	// rather than failing the resolution (e.g. a squad dropped because its
+	// leader is no longer an enabled agent). Shown in Settings.
+	ConfigWarnings        []string
 	ConfigPath            string
 	ModelsConfigPath      string
 	Providers             map[string]RuntimeProviderConfig
@@ -935,29 +939,41 @@ func maxInt(a, b int) int {
 }
 
 // resolveSquadEntries normalises raw JSON squad entries against the agent
-// catalogue. It enforces:
-//   - non-empty squad name; names lower-cased and unique
+// catalogue:
+//   - squad names are lower-cased and unique
 //   - leader and members reference existing, enabled agents
 //   - the squad's leader is an agent marked `leader: true`
 //   - members are de-duplicated; the leader is never listed as a member
 //
-// Returns the resolved squads and an error describing the first violation.
-func resolveSquadEntries(entries []SquadEntry, agents []RuntimeAgentConfig) ([]RuntimeSquadConfig, error) {
+// A broken squad never fails the whole configuration: a squad whose name is
+// empty or repeated, whose leader is missing or not a leader, or (leaderless)
+// that does not end with exactly one member is dropped; a member that is not
+// an enabled agent is dropped from its squad. Each drop is returned as a
+// warning (and logged by the caller). Typical cause: a user overlay that still
+// names agents of a Claude Code plugin since uninstalled — that must not stop
+// the server from starting.
+func resolveSquadEntries(entries []SquadEntry, agents []RuntimeAgentConfig) ([]RuntimeSquadConfig, []string) {
 	enabled := map[string]RuntimeAgentConfig{}
 	for _, a := range agents {
 		if a.Enabled {
 			enabled[a.Name] = a
 		}
 	}
+	var warnings []string
+	warn := func(format string, args ...any) {
+		warnings = append(warnings, fmt.Sprintf(format, args...))
+	}
 	seenName := map[string]bool{}
 	out := make([]RuntimeSquadConfig, 0, len(entries))
 	for _, e := range entries {
 		name := strings.ToLower(strings.TrimSpace(e.Name))
 		if name == "" {
-			return nil, fmt.Errorf("runtime config: squad has empty name")
+			warn("squad with an empty name ignored")
+			continue
 		}
 		if seenName[name] {
-			return nil, fmt.Errorf("runtime config: duplicate squad name %q", name)
+			warn("duplicate squad name %q: later entry ignored", name)
+			continue
 		}
 		seenName[name] = true
 		leader := strings.ToLower(strings.TrimSpace(e.Leader))
@@ -969,14 +985,17 @@ func resolveSquadEntries(entries []SquadEntry, agents []RuntimeAgentConfig) ([]R
 		if !leaderless {
 			leaderCfg, ok := enabled[leader]
 			if !ok {
-				return nil, fmt.Errorf("runtime config: squad %q leader %q is not an enabled agent", name, leader)
+				warn("squad %q disabled: leader %q is not an enabled agent", name, leader)
+				continue
 			}
 			if !leaderCfg.Leader {
-				return nil, fmt.Errorf("runtime config: squad %q leader %q is not marked as leader: true", name, leader)
+				warn("squad %q disabled: leader %q is not marked as leader: true", name, leader)
+				continue
 			}
 			seenMember[leader] = true
 		}
 		members := make([]string, 0, len(e.Members))
+		var missing []string
 		for _, raw := range e.Members {
 			m := strings.ToLower(strings.TrimSpace(raw))
 			if m == "" || seenMember[m] {
@@ -984,7 +1003,8 @@ func resolveSquadEntries(entries []SquadEntry, agents []RuntimeAgentConfig) ([]R
 			}
 			seenMember[m] = true
 			if _, ok := enabled[m]; !ok {
-				return nil, fmt.Errorf("runtime config: squad %q member %q is not an enabled agent", name, m)
+				missing = append(missing, m)
+				continue
 			}
 			members = append(members, m)
 		}
@@ -993,8 +1013,16 @@ func resolveSquadEntries(entries []SquadEntry, agents []RuntimeAgentConfig) ([]R
 			// keys on an empty Leader.
 			leader = ""
 			if len(members) != 1 {
-				return nil, fmt.Errorf("runtime config: leaderless squad %q must have exactly one member (got %d); set a leader to coordinate multiple agents", name, len(members))
+				if len(missing) > 0 {
+					warn("squad %q disabled: leaderless squad must have exactly one enabled member (got %d; not enabled: %s)", name, len(members), strings.Join(missing, ", "))
+				} else {
+					warn("squad %q disabled: leaderless squad must have exactly one member (got %d); set a leader to coordinate multiple agents", name, len(members))
+				}
+				continue
 			}
+		}
+		if len(missing) > 0 {
+			warn("squad %q: members not enabled, left out: %s", name, strings.Join(missing, ", "))
 		}
 		out = append(out, RuntimeSquadConfig{
 			Name:        name,
@@ -1004,7 +1032,7 @@ func resolveSquadEntries(entries []SquadEntry, agents []RuntimeAgentConfig) ([]R
 			Hidden:      e.Hidden,
 		})
 	}
-	return out, nil
+	return out, warnings
 }
 
 // synthesizeDefaultSquad builds the fallback squad (named DefaultSquadName)
@@ -1549,10 +1577,12 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	// catalogue (post-inheritance) so leader/member references must be
 	// enabled, real agents. When the JSON has no squads, synthesize a
 	// `default` squad from the enabled agents so callers always have one.
-	out.Squads, err = resolveSquadEntries(cfg.Squads, out.Agents)
-	if err != nil {
-		return RuntimeSettings{}, err
+	var squadWarnings []string
+	out.Squads, squadWarnings = resolveSquadEntries(cfg.Squads, out.Agents)
+	for _, w := range squadWarnings {
+		log.Printf("config: %s", w)
 	}
+	out.ConfigWarnings = append(out.ConfigWarnings, squadWarnings...)
 	for i := range out.Squads {
 		out.Squads[i].Plugin = plugins.squadPlugin[out.Squads[i].Name]
 	}

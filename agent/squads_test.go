@@ -154,13 +154,16 @@ func TestSquadsLeaderless(t *testing.T) {
 	}
 }
 
-// TestSquadsValidation covers the rejection paths.
+// TestSquadsValidation covers the invalid-squad paths: none may fail the
+// resolution (a stale squad must never stop the server); each is reported as a
+// warning and the offending squad (or member) is left out.
 func TestSquadsValidation(t *testing.T) {
 	cases := []struct {
 		name      string
 		agents    []AgentEntry
 		config    string
 		wantError string
+		dropped   string // squad that must not be resolved ("" = none)
 	}{
 		{
 			name:   "unknown leader",
@@ -170,6 +173,7 @@ func TestSquadsValidation(t *testing.T) {
   "squads": [{"name": "default", "leader": "ghost", "members": []}]
 }`,
 			wantError: `leader "ghost"`,
+			dropped:   "default",
 		},
 		{
 			name:   "unknown member",
@@ -178,7 +182,7 @@ func TestSquadsValidation(t *testing.T) {
   "agents": ["leader", "investigator"],
   "squads": [{"name": "default", "leader": "leader", "members": ["ghost"]}]
 }`,
-			wantError: `member "ghost"`,
+			wantError: `member`,
 		},
 		{
 			name:   "duplicate squad name",
@@ -203,6 +207,7 @@ func TestSquadsValidation(t *testing.T) {
   ]
 }`,
 			wantError: `not marked as leader: true`,
+			dropped:   "rogue",
 		},
 		{
 			name:   "leaderless with no member",
@@ -214,7 +219,8 @@ func TestSquadsValidation(t *testing.T) {
     {"name": "solo", "leader": "none", "members": []}
   ]
 }`,
-			wantError: "exactly one member",
+			wantError: "exactly one",
+			dropped:   "solo",
 		},
 		{
 			name:   "leaderless with multiple members",
@@ -226,7 +232,8 @@ func TestSquadsValidation(t *testing.T) {
     {"name": "solo", "leader": "none", "members": ["helper", "web_agent"]}
   ]
 }`,
-			wantError: "exactly one member",
+			wantError: "exactly one",
+			dropped:   "solo",
 		},
 	}
 	for _, tc := range cases {
@@ -235,15 +242,28 @@ func TestSquadsValidation(t *testing.T) {
 			setupAgentsRegistry(t, dir, tc.agents)
 			cfgPath := filepath.Join(dir, "agent.json")
 			mustWrite(t, cfgPath, []byte(tc.config))
-			_, err := ResolveRuntimeSettings(Options{
+			rs, err := ResolveRuntimeSettings(Options{
 				ConfigPath:       cfgPath,
 				ConfigPathStrict: true,
 			})
-			if err == nil {
-				t.Fatalf("expected error containing %q, got nil", tc.wantError)
+			if err != nil {
+				t.Fatalf("an invalid squad must not fail the resolution, got %v", err)
 			}
-			if !strings.Contains(err.Error(), tc.wantError) {
-				t.Fatalf("expected error containing %q, got %v", tc.wantError, err)
+			found := false
+			for _, w := range rs.ConfigWarnings {
+				if strings.Contains(w, tc.wantError) {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("expected a warning containing %q, got %v", tc.wantError, rs.ConfigWarnings)
+			}
+			if tc.dropped != "" {
+				for _, sq := range rs.Squads {
+					if sq.Name == tc.dropped && sq.Leader != "leader" {
+						t.Fatalf("squad %q should have been dropped, got %+v", tc.dropped, sq)
+					}
+				}
 			}
 		})
 	}
