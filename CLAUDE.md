@@ -4515,7 +4515,20 @@ where prose can be skipped — not its offline replay of tasks.
   "differs" answer — which succeeded: the shell returns the status of the last
   command, so `kubectl get pods | grep foo` finding nothing is not a
   `Bash:kubectl` failure (judged on the first word, it opened an episode whose
-  lesson matched every later kubectl pipe that found nothing). A non-timeout
+  lesson matched every later kubectl pipe that found nothing). But the last
+  segment did not necessarily produce the status or the output — a failing `cd`
+  stops a `&&` chain with its own 1, a failing command's stderr reaches the
+  output while the grep after it exits 1 (`kubectl get pods --context bad |
+  grep foo`, also `$(ls | grep yaml)` and a `#` comment holding `|`) — so
+  `grep`/`rg`/`egrep`/`fgrep`/`test`/`[` succeed only with **silent** output (a
+  no-match grep or a false test prints nothing); with output they are
+  **neither** (we know neither that it worked nor what failed — read as a
+  success it would close an episode with failing arguments as "what worked").
+  `diff`/`cmp` print the difference on exit 1, so as the **only** segment they
+  succeed whatever the output; in a multi-segment command they follow the
+  silent rule. This check runs before the silent-failure rule below, so a clean
+  no-match is succeeded (the search found nothing — that is its answer, and it
+  may close an episode opened by an earlier failing grep). A non-timeout
   failure with **nothing to learn from** — output empty, `(no output)`, or the
   bare `Error: exit status N` the tool prints for a silent failure — is
   **neither**. Without a status (observer absent: CLI examples) the text
@@ -4535,7 +4548,9 @@ where prose can be skipped — not its offline replay of tasks.
   anything after a non-path character (start, space, `(`, `=`, `:`…) that is
   absolute or `./`/`../`, relative with a directory (`src/main.go`), or a file
   name whose extension is a known file extension (`prices.go`, `notes.md`; the
-  `fileExtensions` set — go, py, js, ts, json, yaml, md, txt, sh, …), so the
+  `fileExtensions` set — go, py, js, ts, json, yaml, md, txt, sh, vue, tfvars,
+  pdf, png, zip, …; hostnames such as `api.example.com` are deliberately not
+  paths), so the
   same mistake on two files has one signature; a dotted name with another
   ending is an identifier and stays (`undefined: strings.Builder` and
   `undefined: http.Client`, `deployments.apps` and `statefulsets.apps` differ).

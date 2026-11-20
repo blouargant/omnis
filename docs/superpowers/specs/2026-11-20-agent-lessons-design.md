@@ -85,8 +85,14 @@ Observed by the host, per tool call:
   split outside quotes — is `grep`, `rg`, `egrep`, `fgrep`, `diff`, `cmp`,
   `test` or `[`: that is their "no match" / "differs" answer, and the shell
   returns the last command's status (`kubectl get pods | grep foo` finding
-  nothing is not a kubectl error). A Bash call with no reported status is
-  judged on its text;
+  nothing is not a kubectl error). The last segment did not necessarily
+  produce the status or the output, though (a failing `cd` before `&&`, a
+  failing command's stderr in a pipe), so `grep`, `rg`, `egrep`, `fgrep`,
+  `test` and `[` count as succeeded only when the output is silent; with output
+  the call is neither. `diff` and `cmp` succeed whatever their output only when
+  they are the whole command; in a pipeline or chain they follow the same
+  silent-output rule. A Bash call with no reported status is judged on its
+  text;
 - a call blocked by a hook (`[BLOCKED BY HOOK]`).
 
 A call is then one of three things: failed, succeeded, or **neither**. Neither:
@@ -120,7 +126,8 @@ later call of that tool that succeeded. Without a success there is no episode.
   directory, or a file name with a known file extension (`.go`, `.py`, `.md`,
   `.yaml`, …), after any non-path character (`(`, `=`, `:`…), so the same
   mistake on two files gives one signature; a dotted identifier
-  (`strings.Builder`, `deployments.apps`) is not a path and stays. Lessons are keyed by (agent,
+  (`strings.Builder`, `deployments.apps`) is not a path and stays, nor is a
+  hostname (`api.example.com`). Lessons are keyed by (agent,
   signature); the lesson id is the first 12 hex characters.
 
 No episode is recorded in a turn where memory is read-only (`memoryReadOnly`):
