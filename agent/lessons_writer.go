@@ -188,9 +188,20 @@ func (s *lessonService) takeRunSlot(k runCountKey, now time.Time) bool {
 	return true
 }
 
-// The key word may be followed by a quote (JSON: "password":"x") or an escaped
-// quote (a command inside JSON) before the separator.
-var lessonSecretRE = regexp.MustCompile(`(?i)(?:password|passwd|secret|token|api[_-]?key|authorization)\\?["']?\s*[=:]|bearer\s+\S{8,}|sk-\w{16,}|-----BEGIN [A-Z ]*PRIVATE KEY-----`)
+// lessonSecretRE matches what may be a credential in tool arguments or an error:
+//   - a key word followed by "=" or ":" — possibly after a quote (JSON:
+//     "password":"x") or an escaped quote (a command inside JSON);
+//   - a long flag naming a credential followed by a space and a value
+//     (--password x, --token x, --api-key x);
+//   - an environment-style name ending in _SECRET/_KEY/_TOKEN/_PASSWORD then "=";
+//   - user:password@host in a URL;
+//   - a bearer token, an sk- key, a GitHub token (ghp_, gho_, github_pat_), a
+//     PEM private key header.
+var lessonSecretRE = regexp.MustCompile(`(?i)(?:password|passwd|secret|token|api[_-]?key|authorization)\\?["']?\s*[=:]` +
+	`|--(?:password|passwd|secret|token|api-key|apikey)\s+[^\s-]` +
+	`|\w_(?:secret|key|token|password)\s*=` +
+	`|[a-z][a-z0-9+.-]*://[^\s/@:"]+:[^\s/@"]+@` +
+	`|bearer\s+\S{8,}|sk-\w{16,}|\b(?:ghp|gho)_[a-z0-9]{16,}|\bgithub_pat_\w{16,}|-----BEGIN [A-Z ]*PRIVATE KEY-----`)
 
 // episodeLooksSecret reports whether an episode may carry a credential: such an
 // episode is never sent to a model nor stored.

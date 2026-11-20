@@ -265,3 +265,39 @@ func TestFenceMarkersInDataAreNeutralised(t *testing.T) {
 		}
 	}
 }
+
+func TestSecretDetectionWidened(t *testing.T) {
+	secrets := []string{
+		`{"command":"mysql --password hunter2 -e 'select 1'"}`,
+		`{"command":"gh auth login --token abc123def"}`,
+		`{"command":"tool --api-key abc123"}`,
+		`{"command":"AWS_SECRET_ACCESS_KEY=abc aws s3 ls"}`,
+		`{"command":"export DB_PASSWORD=x"}`,
+		`{"command":"GITHUB_TOKEN=abc gh pr list"}`,
+		`{"command":"OPENAI_KEY=abc run"}`,
+		`{"command":"APP_SECRET=abc run"}`,
+		`{"command":"git clone https://bob:s3cr3t@git.example.com/r.git"}`,
+		`{"command":"curl -H x ghp_abcdefghijklmnopqrstuvwxyz0123"}`,
+		`{"token":"gho_ABCDEFGHIJKLMNOPQRSTUVWX"}`,
+		`clone failed for github_pat_11ABCDEFG0123456789_abcdefghij`,
+	}
+	for _, a := range secrets {
+		if !episodeLooksSecret(lessonEpisode{FailedArgs: a}) {
+			t.Errorf("%s: not detected", a)
+		}
+	}
+	for _, a := range []string{
+		`{"command":"kubectl get pods -n demo"}`,
+		`{"file_path":"/src/tokenizer.go","old_string":"x"}`,
+		`{"command":"export GOFLAGS=-mod=mod"}`,
+		`{"command":"git push origin main"}`,
+		`{"command":"git clone git@github.com:org/repo.git"}`,
+		`{"command":"curl https://example.com/a?b=c"}`,
+		`{"command":"psql -p 5432 -h db"}`,
+		`{"command":"tool --token-file /run/t"}`,
+	} {
+		if episodeLooksSecret(lessonEpisode{FailedArgs: a, WorkedArgs: a, ErrText: a}) {
+			t.Errorf("%s: wrongly dropped", a)
+		}
+	}
+}

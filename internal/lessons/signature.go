@@ -8,8 +8,11 @@ import (
 )
 
 var (
-	reQuoted    = regexp.MustCompile("\"[^\"]*\"|'[^']*'|`[^`]*`")
-	rePath      = regexp.MustCompile(`(^|\s)(?:/|\./)\S*`)
+	reQuoted = regexp.MustCompile("\"[^\"]*\"|'[^']*'|`[^`]*`")
+	// rePath matches a path after a non-path character (start, space, "(",
+	// "=", ":", …): an absolute or ./ ../ path, a relative path with a
+	// directory, or a file name with an extension.
+	rePath      = regexp.MustCompile(`(^|[^\w./-])(?:\.{0,2}/[^\s)\]},;]*|[\w.-]+(?:/[\w.-]+)+/?|[\w-]+(?:\.[\w-]+)*\.[a-z][a-z0-9]{0,7})`)
 	reUUID      = regexp.MustCompile(`\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
 	reHex       = regexp.MustCompile(`\b0x[0-9a-f]+\b|\b[0-9a-f]{8,}\b`)
 	reTimestamp = regexp.MustCompile(`\d{4}-\d{2}-\d{2}[t ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:z|[+-]\d{2}:?\d{2})?`)
@@ -21,12 +24,13 @@ var (
 // normalise strips the volatile parts of an error text so two occurrences of
 // the same failure compare equal.
 func normalise(text string) string {
-	s := strings.ToLower(text)
+	// Only the head can reach the hash; normalising it alone bounds the cost.
+	s := strings.ToLower(truncateRunes(text, 8*SignatureTextChars))
 	s = reQuoted.ReplaceAllString(s, "S")
+	s = reTimestamp.ReplaceAllString(s, "N")
 	s = rePath.ReplaceAllString(s, "${1}P")
 	s = reUUID.ReplaceAllString(s, "H")
 	s = reHex.ReplaceAllString(s, "H")
-	s = reTimestamp.ReplaceAllString(s, "N")
 	s = reDigits.ReplaceAllString(s, "N")
 	s = strings.TrimSpace(reSpace.ReplaceAllString(s, " "))
 	return truncateRunes(s, SignatureTextChars)

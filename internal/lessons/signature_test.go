@@ -57,3 +57,30 @@ func TestToolKeyBash(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestSignatureNormalisesEveryPathShape(t *testing.T) {
+	same := [][2]string{
+		{"Error: old_string not found in prices.go — include more context", "Error: old_string not found in server/main.go — include more context"},
+		{"Error: old_string not found in src/main.go", "Error: old_string not found in /abs/other.py"},
+		{"cannot open:/tmp/x", "cannot open:/var/lib/y/z"},
+		{"failed (/tmp/x) here", "failed (/home/u/a.txt) here"},
+		{"bad value --file=/a/b", "bad value --file=/c/d/e"},
+		{"no such file ./x", "no such file ../y/z"},
+		{"x.go:42:7: undefined: foo", "pkg/y.go:3:1: undefined: foo"},
+		{"failed at 2026-11-20 10:11:12 in a.go", "failed at 2025-01-02 03:04:05 in b.go"},
+	}
+	for _, p := range same {
+		if Signature("T", p[0]) != Signature("T", p[1]) {
+			t.Errorf("expected equal: %q vs %q (%q / %q)", p[0], p[1], normalise(p[0]), normalise(p[1]))
+		}
+	}
+	differ := [][2]string{
+		{"Error: old_string not found in a.go", "Error: old_string appears 2 times in a.go"},
+		{"unknown flag --namespace-all", "unknown flag --all-namespaces"},
+	}
+	for _, p := range differ {
+		if Signature("T", p[0]) == Signature("T", p[1]) {
+			t.Errorf("expected different: %q vs %q", p[0], p[1])
+		}
+	}
+}
