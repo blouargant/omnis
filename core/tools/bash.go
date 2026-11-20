@@ -39,6 +39,10 @@ var shellSplitRe = regexp.MustCompile(`[;&|\n]+`)
 // /dev/zero) as a dd output target or shell redirect target.
 var blockDeviceRe = regexp.MustCompile(`/dev/(sd[a-z]|nvme\d|vd[a-z]|hd[a-z]|mmcblk\d|disk\d)`)
 
+// SafetyFloorBlockedPrefix starts the Bash tool's text for a command the safety
+// floor refused (it never ran).
+const SafetyFloorBlockedPrefix = "Error: command blocked by safety floor"
+
 // SafetyFloorBlock reports whether command trips the hard safety floor,
 // returning a short reason. It is the single source of truth shared by RunBash,
 // RunBashInteractive, RunShellCaptured, and the bg queue so the floor can never
@@ -371,7 +375,7 @@ type bashStatus struct {
 // exactly RunBash's.
 func runBashStatus(ctx context.Context, in BashIn) (string, bashStatus, error) {
 	if b, blocked := SafetyFloorBlock(in.Command); blocked {
-		return fmt.Sprintf("Error: command blocked by safety floor (%q)", b), bashStatus{}, nil
+		return fmt.Sprintf(SafetyFloorBlockedPrefix+" (%q)", b), bashStatus{}, nil
 	}
 	timeout := time.Duration(in.Timeout) * time.Second
 	if timeout <= 0 {
@@ -445,7 +449,7 @@ func exitCodeOf(cmd *exec.Cmd, err error) int {
 // the configured default. On any error newCwd falls back to the input cwd.
 func RunBashInteractive(ctx context.Context, command, cwd string, timeoutSec int) (output, newCwd string, err error) {
 	if b, blocked := SafetyFloorBlock(command); blocked {
-		return fmt.Sprintf("Error: command blocked by safety floor (%q)", b), cwd, nil
+		return fmt.Sprintf(SafetyFloorBlockedPrefix+" (%q)", b), cwd, nil
 	}
 	timeout := time.Duration(timeoutSec) * time.Second
 	if timeout <= 0 {

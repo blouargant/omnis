@@ -1,25 +1,30 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
 
 	"github.com/blouargant/omnis/core/permissions"
+	fstools "github.com/blouargant/omnis/core/tools"
 )
 
 // refusalResults are the results of calls refused before they ran: decisions,
 // not mistakes, and no proof that the arguments work.
 func refusalResults() map[string]map[string]any {
+	floor, _ := fstools.RunBash(context.Background(), fstools.BashIn{Command: "rm -rf /"})
 	return map[string]map[string]any{
-		"gate deny":       {"output": fmt.Sprintf(permissions.DeniedPrefix+" %s: %s", "Bash", "denied")},
-		"auto block":      {"output": permissions.AutoBlockMessage("Bash", "nope")},
-		"budget halt":     {"output": budgetHaltNotice},
-		"agent cap":       {"output": agentCapNotice("coder")},
-		"call cap":        {"output": callCapNotice("coder", 20)},
-		"hook declined":   {"output": fmt.Sprintf(hookBlockPrefix+" %s: %s %s", "Bash", "why", hookDeclinedSuffix)},
-		"hook dontAsk":    {"output": fmt.Sprintf(hookBlockPrefix+" %s: %s: x", "Bash", hookDontAskMarker)},
-		"hook unattended": {"output": fmt.Sprintf(hookBlockPrefix+" %s: %s (%s, so x)", "Bash", "why", hookUnattendedMarker)},
+		"safety floor":      {"output": floor},
+		"read-only refusal": {"output": fstools.ReadOnlyRefusedPrefix + ", so only read-only commands (ls, cat, …) may run. Refused: touch x"},
+		"gate deny":         {"output": fmt.Sprintf(permissions.DeniedPrefix+" %s: %s", "Bash", "denied")},
+		"auto block":        {"output": permissions.AutoBlockMessage("Bash", "nope")},
+		"budget halt":       {"output": budgetHaltNotice},
+		"agent cap":         {"output": agentCapNotice("coder")},
+		"call cap":          {"output": callCapNotice("coder", 20)},
+		"hook declined":     {"output": fmt.Sprintf(hookBlockPrefix+" %s: %s %s", "Bash", "why", hookDeclinedSuffix)},
+		"hook dontAsk":      {"output": fmt.Sprintf(hookBlockPrefix+" %s: %s: x", "Bash", hookDontAskMarker)},
+		"hook unattended":   {"output": fmt.Sprintf(hookBlockPrefix+" %s: %s (%s, so x)", "Bash", "why", hookUnattendedMarker)},
 	}
 }
 
@@ -63,12 +68,12 @@ func Test_classifyToolCall(t *testing.T) {
 	}
 }
 
-// Every error message the fs tools produce is still read as an error.
+// Every error message the fs tools produce is still read as an error (a
+// safety-floor refusal is a decision, see refusalResults).
 func TestFsToolErrorsAreClassifiedAsErrors(t *testing.T) {
 	for _, s := range []string{
 		"Error: old_string not found in /a/x.go",
 		"Error: empty old_string",
-		"Error: command blocked by safety floor (\"rm -rf /\")",
 		"Error: command timed out after 2s\npartial",
 		"Error reading /a/x: permission denied",
 		"Error writing /a/x: read-only file system",

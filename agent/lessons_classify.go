@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/blouargant/omnis/core/permissions"
+	fstools "github.com/blouargant/omnis/core/tools"
 	"github.com/blouargant/omnis/internal/lessons"
 )
 
@@ -115,12 +116,14 @@ func lastBashCommand(args map[string]any) string {
 }
 
 // isDecisionRefusal reports whether s is a refusal that is not the agent's
-// mistake: a gate denial, an auto-mode block, a budget stop, or a hook block
-// the user declined / the mode or an unattended run refused.
+// mistake: a gate denial, an auto-mode block, a budget stop, a Bash command the
+// safety floor or a read-only agent's confinement refused, or a hook block the
+// user declined / the mode or an unattended run refused.
 func isDecisionRefusal(s string) bool {
 	for _, p := range []string{
 		permissions.DeniedPrefix, permissions.AutoBlockPrefix,
 		budgetHaltPrefix, agentCapPrefix, callCapPrefix,
+		fstools.SafetyFloorBlockedPrefix, fstools.ReadOnlyRefusedPrefix,
 	} {
 		if strings.HasPrefix(s, p) {
 			return true

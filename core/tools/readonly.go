@@ -21,6 +21,11 @@ import (
 // ReadOnlyWritable is where a read-only agent may still write.
 func ReadOnlyWritable() []string { return sandbox.DefaultWritable() }
 
+// ReadOnlyRefusedPrefix starts the Bash tool's text for a read-only agent's
+// command refused because the sandbox is unavailable and the command is not
+// recognised as read-only (it never ran).
+const ReadOnlyRefusedPrefix = "Error: this agent is read-only and the filesystem sandbox is not available on this host"
+
 // confineReadOnly puts cmd under the read-only sandbox. Where the sandbox is
 // unavailable (no Landlock: macOS, Windows, an old kernel), only a command
 // the permission layer recognises as read-only may run; the returned message
@@ -35,7 +40,7 @@ func confineReadOnly(cmd *exec.Cmd, command string) string {
 	if permissions.AllReadOnly(command) {
 		return ""
 	}
-	return "Error: this agent is read-only and the filesystem sandbox is not available on this host, " +
+	return ReadOnlyRefusedPrefix + ", " +
 		"so only read-only commands (ls, cat, grep, git diff/log/status, …) may run. Refused: " + command
 }
 
