@@ -78,28 +78,34 @@ Observed by the host, per tool call:
 - a call blocked by a hook (`[BLOCKED BY HOOK]`).
 
 Not counted: a user's deny on a permission card, a permission `deny` rule, an
-auto-mode block, a budget or cap notice, a Stop. These are decisions, not
-mistakes to learn around.
+auto-mode block, a budget or cap notice, a Stop, and a hook block the user
+declined or that `dontAsk` or an unattended run refused. These are decisions,
+not mistakes to learn around.
 
 ### 2. The episode
 
 An **episode** is one failure followed by a success, for the same agent, the
 same tool, in the same run (ADK invocation id), in the same user-facing session
-(`realSessionID`). It holds: agent name, tool key, the failed call's arguments
+(`realSessionID`). The success must have **started after the failure
+completed** (the real start time of the call, not its completion time): ADK
+runs the calls of one model response concurrently, and a sibling that started
+earlier did not benefit from the failure. It holds: agent name, tool key, the failed call's arguments
 and error text, the number of failed attempts, and the arguments of the first
 later call of that tool that succeeded. Without a success there is no episode.
 
 - **Tool key**: the tool name; for `Bash`, `Bash:<first word of the command>`
   after wrapper stripping (`kubectl`, `git`, …).
 - **Signature**: tool key + the error text normalised (lower case; paths,
-  numbers, quoted strings, hex ids replaced by placeholders; whitespace
-  collapsed; first 200 chars), hashed. Lessons are keyed by (agent, signature).
+  numbers, timestamps, quoted strings, hex ids replaced by placeholders;
+  whitespace collapsed; first 200 chars), hashed. Lessons are keyed by (agent,
+  signature); the lesson id is the first 12 hex characters.
 
 No episode is recorded in a turn where memory is read-only (`memoryReadOnly`):
 a hidden session, a mailbox or A2A turn, a spawned session's result delivered to
 its parent, a background-task notification. The request there does not come
 from the user. Scheduled turns and a spawned session's own task do record. A
-hint is still delivered in those turns.
+hint is still delivered in those turns, but no counter, outcome or episode is
+recorded.
 
 ### 3. Writing a lesson
 
@@ -107,15 +113,18 @@ At the moment an episode closes, it is queued (bounded queue, dropped when
 full). A process-wide worker on `Infrastructure` handles it, so no surface code
 is involved:
 
-- If a lesson already exists for (agent, signature): update its counters, stop.
+- If a lesson already exists for (agent, signature): stop. The after-tool
+  callback is the single owner of the counters (`seen` counts every occurrence,
+  recovered or not); the worker never touches them.
 - Else one non-streamed model call (`eval_model_ref`, else the leader's model,
   as `/goal` does;
   reasoning off; 20 s). Input, fenced as data: tool, failed arguments, error
   text, working arguments. Output: `NONE` (transient or not the agent's doing),
   or a `cue` (when this applies) and a `lesson` (what to do), one line each,
   ≤ 300 chars.
-- Limits: 3 new lessons per session per turn, 200 lessons per agent (a new one
-  then replaces the least seen retired or hint lesson).
+- Limits: 3 writer calls per run (a `NONE` or failed call counts), 200 lessons
+  per agent (a new one then replaces the least seen retired, else hint, lesson;
+  none is written when all are prompt lessons).
 
 A failure of the call, or `NONE`, writes nothing. `NONE` is remembered for the
 signature for 24 h so the call is not repeated.
@@ -131,8 +140,12 @@ So:
 - The writer is told the fenced text is data and that a lesson may only say how
   to call this tool. Its output is rejected unless it is one line per field
   within the size limit.
-- An episode whose arguments look like they hold a secret (same patterns as the
-  settings redaction) is dropped.
+- An episode whose failed or working arguments, or error text, match a secret
+  pattern is dropped before any model call: password/passwd/secret/token/
+  api key/authorization followed by `=` or `:` (JSON-shaped and escaped quotes
+  included), `bearer <token>`, `sk-…` keys, a PEM private key header. Fence
+  markers inside the data sent to the writer are neutralised so it cannot close
+  its own fence.
 - A lesson reaches only the agent that made the error, on that tool. Every call
   it leads to still goes through hooks, permissions and the Bash safety floor.
 - Lesson text sits in a tool result note or in the system instruction, never in
@@ -140,7 +153,9 @@ So:
   it as the user's words.
 
 Residual risk, accepted: a crafted error message can still bias the one-line
-lesson. It cannot grant a permission.
+lesson. It cannot grant a permission. The secret patterns are not exhaustive
+(`--password x`, `AWS_SECRET_ACCESS_KEY=…`, `user:pass@host`, `ghp_` tokens are
+not matched).
 
 ### 5. Storage
 
@@ -159,6 +174,11 @@ Fields: `agent`, `tool`, `signature`, `cue`, `lesson`, `failed` (excerpt),
 - `hinted`, `recovered`, `repeated`: see Delivery;
 - `seen_in_prompt`: occurrences while the lesson was in state `prompt`.
 
+Also kept: the last 8 distinct session ids, the last 5 hint outcomes,
+`promoted_seen` (the value of `seen` when the lesson last entered `prompt`) and
+`prompt_failed` (set when a prompt lesson was demoted because it did not prevent
+the error).
+
 The per-user root is resolved from the session the way the collection plugin
 does it (`collectionRoot(sessionID)`), and from the caller on the routes
 (`userRoot`). When several calls of one model response run in parallel, "the
@@ -170,24 +190,31 @@ next call" is the next one to complete.
 (runner plugin) and on every sub-agent (composed with the existing shaper via
 `chainAfterTool`, since ADK stops at the first callback that returns a result).
 When a tool result is an error whose signature has a lesson for this agent, a
-`lesson` note is added to the result after shaping, so it is never cut:
+`lesson` key is added to the result after shaping, so it is never cut:
 the lesson line and the arguments that worked. `hinted` is incremented. The next
-call of that tool by that agent in the run decides `recovered` (success) or
-`repeated` (same signature again).
+call of that tool by that agent in the run that **started after the hint**
+decides `recovered` (success) or `repeated` (same signature again); a different
+error settles neither. The hint is added after the events callback, so the audit
+log does not show it.
 
 **Prompt (lessons in state `prompt`).** A before-model callback appends an
 `<agent-lessons>` block to the agent's system instruction: one line per lesson
 (`cue` → `lesson`), headed as notes learned from this agent's earlier tool
-errors. Budget 1,500 chars, most seen first; what does not fit stays a hint.
-Roots and sub-agents; never the router.
+errors. Budget 1,500 chars; lessons are ordered by `promoted_seen` (the `seen`
+count frozen at promotion), then id, and the list stops at the first one that
+does not fit (it stays a prompt lesson on disk). Roots (a runner plugin) and
+sub-agents; never the router.
 
 Known limit: on a squad root, a `PostToolUse` hook that rewrites a tool result
-ends the plugin chain, so that result gets no hint. Sub-agents are not affected. The block changes only when a lesson's
-state changes, so the prompt cache holds.
+ends the plugin chain, so that result gets no hint. Sub-agents are not affected.
+The block changes only when a lesson enters or leaves the prompt state, so the
+prompt cache holds: this is why the order is frozen at promotion and not the
+live `seen`, which would reorder the block on every error.
 
 ### 7. Promotion and retirement
 
-Constants, to be tuned with the bench:
+Constants (the values below are the ones shipped; the bench did not change
+them):
 
 - **Promote** `hint` → `prompt`: `seen` ≥ 3 across ≥ 2 sessions. The agent keeps
   walking into it.
@@ -195,15 +222,18 @@ Constants, to be tuned with the bench:
   working call. A retired lesson keeps its file (so it is not rewritten) and is
   never delivered.
 - **Demote** `prompt` → `hint`: `seen_in_prompt` ≥ 3 (the text does not prevent
-  it; the hint stays), or no occurrence for 60 days (the cost is no longer
-  justified; one new occurrence promotes it again).
+  it; the hint stays and the lesson is never promoted again), or no occurrence
+  for 60 days (the cost is no longer justified; one new occurrence promotes it
+  again).
 
 ### 8. Switches and visibility
 
-- `lessons: {enabled}` in `agents.json`, `OMNIS_LESSONS=false`. Default on.
+- `lessons: {enabled}` in `agents.json`, `OMNIS_LESSONS=false` (overrides it).
+  Default on. Read at call time from the current generation, so a reload that
+  turns it off also silences sessions draining on an older one.
 - Per agent: `"lessons": false` in `agent.json`.
 - Settings → Agent: a read-only **Lessons** list with state and counters, and a
-  delete button per lesson. `GET /api/agents/:name/lessons`,
+  delete button per lesson, and the per-agent switch. `GET /api/agents/:name/lessons`,
   `DELETE /api/agents/:name/lessons/:id`. No approval step.
 - One log line per lesson written, promoted, demoted, retired.
 

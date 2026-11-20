@@ -30,6 +30,7 @@
 - **File preview** — click a file the conversation produced (a path in a reply, the Results card, an `@file` reference) to show it in a column next to the chat: Markdown rendered, images, PDF, HTML, code.
 - **Pinned chats** — pin a chat from its menu (or drag it) and it shows in a Pinned section at the top of the sidebar, above the collections.
 - **Soft-skills retired** — soft-skills, the post-session curator and the `/learn` / `/learn-now` commands are removed; collection memory replaces them, and old configurations and conversations keep loading.
+- **Agents learn from their tool errors** — when a tool call fails and then works, the agent keeps a one-line lesson; the next time the same error appears the lesson is added to the error, and lessons that keep coming back are placed in the agent's prompt. See and delete them in Settings → Agents → an agent → Lessons; turn it off per agent with **Learn from errors**.
 
 ## 2.1 (in development) — Collection tree and settings dialog
 
