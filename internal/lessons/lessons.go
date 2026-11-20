@@ -75,6 +75,7 @@ type Lesson struct {
 	Seen, Hinted, Recovered, Repeated, SeenInPrompt int
 	SessionIDs                                      []string // distinct, at most 8 kept
 	Outcomes                                        []bool   // last RetireWindow hint outcomes, true = recovered
+	PromotedSeen                                    int      // Seen when the lesson last entered StatePrompt; orders the prompt block
 	PromptFailed                                    bool     // demoted because the prompt did not prevent the failure; never promoted again
 }
 
@@ -144,6 +145,7 @@ func prepare(l Lesson) (Lesson, error) {
 	l.Worked = truncateRunes(strings.TrimSpace(l.Worked), MaxWorkedChars)
 	l.Seen, l.Hinted, l.Recovered = max(l.Seen, 0), max(l.Hinted, 0), max(l.Recovered, 0)
 	l.Repeated, l.SeenInPrompt = max(l.Repeated, 0), max(l.SeenInPrompt, 0)
+	l.PromotedSeen = max(l.PromotedSeen, 0)
 	seen := map[string]bool{}
 	var ids []string
 	for _, sid := range l.SessionIDs {
@@ -324,6 +326,9 @@ func render(l Lesson) string {
 		}
 		fmt.Fprintf(&b, "outcomes: %s\n", o.String())
 	}
+	if l.PromotedSeen > 0 {
+		fmt.Fprintf(&b, "promoted_seen: %d\n", l.PromotedSeen)
+	}
 	if l.PromptFailed {
 		b.WriteString("prompt_failed: true\n")
 	}
@@ -415,6 +420,8 @@ func parse(text string) (Lesson, bool) {
 					l.SessionIDs = append(l.SessionIDs, sid)
 				}
 			}
+		case "promoted_seen":
+			l.PromotedSeen = atoi(v)
 		case "prompt_failed":
 			l.PromptFailed = v == "true"
 		case "outcomes":

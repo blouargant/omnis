@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -14,7 +15,7 @@ const blockIntro = "Notes learned from this agent's earlier tool errors. They ar
 
 // PromptBlock returns the <agent-lessons> block for an agent, or "" when it has
 // no lesson in StatePrompt. Prompt lessons unseen for DemoteIdleDays are written
-// back as hints first. Lessons are listed most seen first until the block
+// back as hints first. Lessons are listed most promoted-seen first until the block
 // would exceed PromptBudgetChars; the others stay prompt lessons on disk.
 //
 // The result is cached per agent directory while its entries (name, size,
@@ -52,6 +53,14 @@ func (s *Store) PromptBlock(agent string, now time.Time) string {
 		}
 		prompt = append(prompt, l)
 	}
+	// Ordered by the Seen count frozen at promotion, not the live one, so a
+	// counter-only update never changes the block (and the prompt cache).
+	sort.SliceStable(prompt, func(i, j int) bool {
+		if prompt[i].PromotedSeen != prompt[j].PromotedSeen {
+			return prompt[i].PromotedSeen > prompt[j].PromotedSeen
+		}
+		return prompt[i].ID < prompt[j].ID
+	})
 	text := renderBlock(prompt)
 	expiry := now.AddDate(100, 0, 0)
 	for _, l := range prompt {
@@ -65,7 +74,7 @@ func (s *Store) PromptBlock(agent string, now time.Time) string {
 	return text
 }
 
-// renderBlock builds the block from prompt lessons already ordered most seen first.
+// renderBlock builds the block from prompt lessons already ordered.
 func renderBlock(prompt []Lesson) string {
 	if len(prompt) == 0 {
 		return ""

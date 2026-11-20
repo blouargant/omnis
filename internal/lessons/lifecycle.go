@@ -124,6 +124,7 @@ func (s *Store) RecordSeen(agent, signature, sessionID string, now time.Time) (l
 			l.State = promoteState(*l)
 			if l.State == StatePrompt {
 				l.SeenInPrompt = 0
+				l.PromotedSeen = l.Seen
 			}
 		}
 	})

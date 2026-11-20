@@ -10,7 +10,7 @@ import (
 func promptLesson(t *testing.T, s *Store, n, seen int, text string) {
 	t.Helper()
 	l := mk(n)
-	l.State, l.Seen, l.LastSeen = StatePrompt, seen, time.Now()
+	l.State, l.Seen, l.PromotedSeen, l.LastSeen = StatePrompt, seen, seen, time.Now()
 	l.Cue, l.Text = fmt.Sprintf("cue %d", n), text
 	if err := s.Save(l); err != nil {
 		t.Fatal(err)
@@ -74,5 +74,55 @@ func TestPromptBlockIsStableBetweenWrites(t *testing.T) {
 	promptLesson(t, s, 2, 4, "other")
 	if c := s.PromptBlock("coder", now); c == a {
 		t.Fatal("write not seen")
+	}
+}
+
+func TestPromptBlockUnchangedByCounterUpdates(t *testing.T) {
+	s := In(t.TempDir())
+	promptLesson(t, s, 1, 5, "text a")
+	promptLesson(t, s, 2, 4, "text b")
+	now := time.Now()
+	before := s.PromptBlock("coder", now)
+	b := mk(2)
+	for i := 0; i < 2; i++ {
+		if _, _, err := s.RecordSeen("coder", b.Signature, "s", now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.RecordHint("coder", b.Signature[:12]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RecordOutcome("coder", b.Signature[:12], true); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := s.Find("coder", b.Signature)
+	if d.State != StatePrompt || d.Seen != 6 {
+		t.Fatalf("setup: %+v", d)
+	}
+	if after := s.PromptBlock("coder", now); after != before {
+		t.Fatalf("block changed:\n%s\n--\n%s", before, after)
+	}
+}
+
+func TestPromptBlockSetUnchangedAtBudgetEdge(t *testing.T) {
+	s := In(t.TempDir())
+	long := strings.Repeat("x", 250)
+	for i := 1; i <= 12; i++ {
+		promptLesson(t, s, i, i, long)
+	}
+	now := time.Now()
+	before := s.PromptBlock("coder", now)
+	low := mk(1) // PromotedSeen 1: not shown
+	for i := 0; i < 2; i++ {
+		if _, _, err := s.RecordSeen("coder", low.Signature, "s", now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d, _ := s.Find("coder", low.Signature)
+	if d.State != StatePrompt || d.Seen != 3 {
+		t.Fatalf("setup: %+v", d)
+	}
+	if after := s.PromptBlock("coder", now); after != before {
+		t.Fatal("shown set changed")
 	}
 }
