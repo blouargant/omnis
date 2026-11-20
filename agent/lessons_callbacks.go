@@ -161,12 +161,13 @@ func (s *lessonService) isEnabled() bool {
 
 // syncBashObserver installs the Bash exit observer while lessons are on and
 // removes it while they are off, so a disabled service costs the Bash tool one
-// nil check.
+// nil check. The observer is process-wide: removing it clears only this
+// service's own, never one another service installed since.
 func (s *lessonService) syncBashObserver() {
 	if s.isEnabled() {
-		fstools.SetBashExitObserver(s.observeBashExit)
+		fstools.InstallBashExitObserver(s, s.observeBashExit)
 	} else {
-		fstools.SetBashExitObserver(nil)
+		fstools.RemoveBashExitObserver(s)
 	}
 }
 
@@ -207,13 +208,15 @@ func (s *lessonService) rootFor(sessionID string) (root string, ok bool) {
 	return paths.ConfigWriteDir(), true
 }
 
-// Close stops queueing episodes and stops the writer worker, waiting for it for
-// at most lessonCloseWait.
+// Close stops queueing episodes, removes its Bash exit observer if it is still
+// the installed one, and stops the writer worker, waiting for it for at most
+// lessonCloseWait.
 func (s *lessonService) Close() {
 	if s == nil {
 		return
 	}
 	s.closed.Store(true)
+	fstools.RemoveBashExitObserver(s)
 	s.cancel()
 	select {
 	case <-s.done:

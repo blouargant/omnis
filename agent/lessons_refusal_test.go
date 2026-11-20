@@ -5,6 +5,10 @@ import (
 	"testing"
 	"time"
 
+	adkagent "google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/tool/toolconfirmation"
+
+	fstools "github.com/blouargant/omnis/core/tools"
 	"github.com/blouargant/omnis/internal/lessons"
 )
 
@@ -235,5 +239,64 @@ func TestBashPipeToGrepNoMatchOpensNoEpisode(t *testing.T) {
 	bashCall(s, run.withCall("3"), "kubectl get pods", "NAME READY", 0)
 	if eps := drainEpisodes(s); len(eps) != 0 {
 		t.Fatalf("an uninformative or no-match exit opened an episode: %+v", eps)
+	}
+}
+
+// bashToolCtx is a lessonCtx the real Bash tool can run under.
+type bashToolCtx struct{ lessonCtx }
+
+func (bashToolCtx) ToolConfirmation() *toolconfirmation.ToolConfirmation { return nil }
+
+// runRealBash runs the real Bash tool under s's lesson callbacks and returns
+// the exit status s recorded for the call (nil when it recorded none).
+func runRealBash(t *testing.T, s *lessonService, c lessonCtx, cmd string) *bashExit {
+	t.Helper()
+	var bash interface {
+		Run(ctx adkagent.Context, args any) (map[string]any, error)
+	}
+	for _, tl := range fstools.New() {
+		if tl.Name() == "Bash" {
+			bash, _ = tl.(interface {
+				Run(ctx adkagent.Context, args any) (map[string]any, error)
+			})
+		}
+	}
+	if bash == nil {
+		t.Fatal("no runnable Bash tool")
+	}
+	args := map[string]any{"command": cmd}
+	s.BeforeTool("coder")(c, namedTool{name: "Bash"}, args)
+	if _, err := bash.Run(bashToolCtx{c}, args); err != nil {
+		t.Fatal(err)
+	}
+	_, exit := s.takeStart(callKey{c.sid, c.inv, c.call}, time.Time{})
+	return exit
+}
+
+// The Bash exit observer is process-wide: closing (or switching off) one
+// service never removes the observer another service installed.
+func TestClosingOneServiceKeepsAnotherServicesBashObserver(t *testing.T) {
+	lessonEnv(t)
+	t.Cleanup(func() { fstools.SetBashExitObserver(nil) })
+	a := newLessonService(nil)
+	b := newLessonService(nil)
+	t.Cleanup(b.Close)
+	a.setEnabledValue(true)
+	b.setEnabledValue(true) // b installed last
+	a.Close()
+	run := newLessonCtx("s1", "inv1")
+	if exit := runRealBash(t, b, run.withCall("1"), "exit 3"); exit == nil || exit.code != 3 {
+		t.Fatalf("b's observer was removed by a.Close: %+v", exit)
+	}
+	off := newLessonService(nil)
+	t.Cleanup(off.Close)
+	off.setEnabledValue(false)
+	if exit := runRealBash(t, b, run.withCall("2"), "exit 4"); exit == nil || exit.code != 4 {
+		t.Fatalf("b's observer was removed by a disabled service: %+v", exit)
+	}
+	// Closing the owner removes it.
+	b.Close()
+	if exit := runRealBash(t, b, run.withCall("3"), "exit 5"); exit != nil {
+		t.Fatalf("a closed service still observes: %+v", exit)
 	}
 }
