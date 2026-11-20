@@ -183,6 +183,7 @@ func TestOutcomeIsRecorded(t *testing.T) {
 func TestSuccessAfterFailureQueuesAnEpisode(t *testing.T) {
 	home := lessonEnv(t)
 	s := newLessonService(nil)
+	stopLessonWorker(s) // the test inspects the queue itself
 	cb := s.AfterTool("coder")
 	bash := namedTool{name: "Bash"}
 	c := newLessonCtx("s1", "inv1")
@@ -291,6 +292,7 @@ func TestPanicInLessonCodeLeavesTheResultAlone(t *testing.T) {
 func TestQueueFullDropsTheEpisode(t *testing.T) {
 	lessonEnv(t)
 	s := newLessonService(nil)
+	stopLessonWorker(s) // the test inspects the queue itself
 	for i := 0; i < lessonQueueCap; i++ {
 		s.queue <- lessonEpisode{}
 	}
@@ -374,6 +376,7 @@ func TestAgentLessonsFlagIsOptOut(t *testing.T) {
 func TestParallelSiblingSuccessDoesNotQueueAnEpisode(t *testing.T) {
 	lessonEnv(t)
 	s := newLessonService(nil)
+	stopLessonWorker(s) // the test inspects the queue itself
 	before, after := s.BeforeTool("coder"), s.AfterTool("coder")
 	bash := namedTool{name: "Bash"}
 	run := newLessonCtx("s1", "inv1")
@@ -451,4 +454,10 @@ func TestStartTimesAreBounded(t *testing.T) {
 	if out != nil || err != nil {
 		t.Fatalf("BeforeTool returned %v %v", out, err)
 	}
+}
+
+// stopLessonWorker stops the writer worker so a test can read the queue.
+func stopLessonWorker(s *lessonService) {
+	s.cancel()
+	<-s.done
 }

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -30,6 +31,8 @@ const (
 	// call whose after-tool callback never runs must not leak.
 	lessonStartsMax = 4096
 	lessonStartTTL  = 30 * time.Minute
+	// lessonCloseWait bounds how long Close waits for the worker.
+	lessonCloseWait = 2 * time.Second
 )
 
 // lessonService is the process-wide agent-lessons machinery: it adds a known
@@ -54,6 +57,20 @@ type lessonService struct {
 
 	startsMu sync.Mutex
 	starts   map[callKey]time.Time
+
+	// The writer worker: one goroutine consuming the queue.
+	ctx    context.Context
+	cancel context.CancelFunc
+	done   chan struct{}
+
+	writerMu sync.RWMutex
+	writer   lessonWriter
+
+	wmu     sync.Mutex // guards the two bounded maps below
+	none    map[noneKey]lessonStamp
+	runs    map[runCountKey]lessonStamp
+	wseq    uint64
+	lastLog atomic.Int64 // unix nanos of the last queue-full log line
 }
 
 // callKey identifies one tool call: its start time is recorded by BeforeTool
@@ -83,8 +100,13 @@ func newLessonService(enabled func() bool) *lessonService {
 		enabledFn: enabled,
 		pending:   map[pendingHintKey]pendingHint{},
 		starts:    map[callKey]time.Time{},
+		none:      map[noneKey]lessonStamp{},
+		runs:      map[runCountKey]lessonStamp{},
+		done:      make(chan struct{}),
 	}
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.tracker = newLessonTracker(s.enqueue)
+	go s.worker()
 	return s
 }
 
@@ -149,12 +171,18 @@ func (s *lessonService) storeFor(sessionID string) *lessons.Store {
 	return lessons.In(s.rootFor(sessionID))
 }
 
-// Close stops queueing episodes.
+// Close stops queueing episodes and stops the writer worker, waiting for it for
+// at most lessonCloseWait.
 func (s *lessonService) Close() {
 	if s == nil {
 		return
 	}
 	s.closed.Store(true)
+	s.cancel()
+	select {
+	case <-s.done:
+	case <-time.After(lessonCloseWait):
+	}
 }
 
 // enqueue hands an episode to the writer without ever blocking: a full queue
@@ -171,7 +199,12 @@ func (s *lessonService) enqueue(ep lessonEpisode) {
 	select {
 	case s.queue <- ep:
 	default:
-		log.Printf("lessons: episode queue full, dropped an episode of %s on %s", ep.Agent, ep.ToolKey)
+		now := time.Now().UnixNano()
+		if last := s.lastLog.Load(); last == 0 || now-last >= int64(time.Minute) {
+			if s.lastLog.CompareAndSwap(last, now) {
+				log.Printf("lessons: episode queue full, dropped an episode of %s on %s", ep.Agent, ep.ToolKey)
+			}
+		}
 	}
 }
 

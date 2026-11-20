@@ -16,9 +16,9 @@ const (
 // lessonEpisode is a failure of a tool followed by a success of the same tool
 // in the same run: the raw material of a lesson.
 type lessonEpisode struct {
-	Root, SessionID, Agent, Tool, ToolKey, Signature string
-	FailedArgs, ErrText, WorkedArgs                  string // JSON, capped at 2000 chars each
-	Attempts                                         int
+	Root, SessionID, Invocation, Agent, Tool, ToolKey, Signature string
+	FailedArgs, ErrText, WorkedArgs                              string // JSON, capped at 2000 chars each
+	Attempts                                                     int
 }
 
 type runKey struct{ session, invocation, agent string }
@@ -100,7 +100,7 @@ func (t *lessonTracker) observe(k runKey, root, tool string, args map[string]any
 	}
 	delete(rs.open, toolKey)
 	e := lessonEpisode{
-		Root: of.root, SessionID: k.session, Agent: k.agent, Tool: of.tool, ToolKey: toolKey,
+		Root: of.root, SessionID: k.session, Invocation: k.invocation, Agent: k.agent, Tool: of.tool, ToolKey: toolKey,
 		Signature: of.sig, FailedArgs: of.args, ErrText: of.errText, WorkedArgs: capJSON(args),
 		Attempts: of.attempts,
 	}

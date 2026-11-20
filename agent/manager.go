@@ -60,6 +60,7 @@ func NewManager(infra *Infrastructure, first *Instance) *Manager {
 	// The lessons switch follows the CURRENT generation, so a hot-reload that
 	// turns lessons off also silences sessions draining on an older one.
 	if infra != nil {
+		infra.Lessons.setWriter(m.writeLesson)
 		infra.Lessons.setEnabled(func() bool {
 			if inst := m.Current(); inst != nil {
 				return inst.Settings.LessonsEnabled
