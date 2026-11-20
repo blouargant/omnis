@@ -40,7 +40,8 @@ func normalise(text string) string {
 
 // fileExtensions are the extensions that make a bare dotted name (no "/") a
 // file name. Anything else — strings.builder, http.client, deployments.apps —
-// is an identifier and stays in the signature.
+// is an identifier and stays in the signature. Hostnames (api.example.com) are
+// deliberately not paths either: which host failed is part of the error.
 var fileExtensions = map[string]bool{
 	"go": true, "py": true, "js": true, "ts": true, "tsx": true, "jsx": true,
 	"json": true, "yaml": true, "yml": true, "toml": true, "md": true, "txt": true,
@@ -50,6 +51,13 @@ var fileExtensions = map[string]bool{
 	"proto": true, "lock": true, "mod": true, "sum": true, "cfg": true,
 	"conf": true, "ini": true, "env": true, "log": true, "csv": true,
 	"tf": true, "gradle": true,
+	"mjs": true, "cjs": true, "vue": true, "svelte": true, "swift": true,
+	"scala": true, "kts": true, "dart": true, "lua": true, "pl": true, "r": true,
+	"bash": true, "zsh": true, "ps1": true, "j2": true, "tpl": true, "tmpl": true,
+	"hcl": true, "tfvars": true, "properties": true, "jsonl": true, "ndjson": true,
+	"ipynb": true, "rst": true, "pem": true, "pdf": true, "png": true, "jpg": true,
+	"jpeg": true, "gif": true, "svg": true, "zip": true, "gz": true, "tar": true,
+	"tgz": true,
 }
 
 // replacePath replaces one rePath match by the path placeholder, keeping the

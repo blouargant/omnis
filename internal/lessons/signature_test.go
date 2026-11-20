@@ -104,3 +104,12 @@ func TestSignatureKeepsDottedIdentifiers(t *testing.T) {
 		}
 	}
 }
+
+func TestSignatureExtraFileExtensionsAndHostnames(t *testing.T) {
+	if Signature("T", "cannot read app.vue") != Signature("T", "cannot read deploy.tfvars") {
+		t.Error("vue and tfvars files must normalise alike")
+	}
+	if Signature("T", "dial api.example.com failed") == Signature("T", "dial db.internal.net failed") {
+		t.Error("hostnames are not paths")
+	}
+}
