@@ -28,6 +28,46 @@ doesn't have to go looking for it.
 See [Sessions → Collection memory](03-sessions.md#collection-memory) for the
 details.
 
+## Lessons from tool errors
+
+Collection memory keeps what **you** said. **Agent lessons** keep what an agent
+**learned by itself**: when it calls a tool wrongly, gets an error, then calls
+the same tool again correctly, Omnis stores a one-line lesson for that agent
+("when listing pods in a namespace, pass `-n <namespace>`"). Nothing asks you
+to approve it, and no question or card is ever shown.
+
+- **When one is learned** — only after an error followed by a success of the
+  same tool, in the same run. For a shell command, an error is a non-zero exit
+  status (except status 1 when the last command of the line is `grep`, `diff`,
+  `test` or a similar command answering "no match"), and a failure with no
+  output teaches nothing. A command refused by the safety floor is not an
+  error either. A failure the agent never recovered from never creates
+  a lesson. A refusal — yours on a permission card, a permission rule, an
+  auto-mode block, a budget notice — is neither an error nor a success: it never
+  creates a lesson, and a call you refused is never recorded as "the arguments
+  that worked". A small model judges whether the error teaches something
+  general; a one-off typo or a transient failure writes nothing. Episodes that
+  look like they contain a password or a token (`--password x`,
+  `API_KEY=…`, `user:pass@host`, GitHub tokens…) are dropped.
+- **How it comes back** — the next time the same error appears for that agent,
+  a note is added to the error: the lesson and the arguments that worked then.
+  A lesson that keeps recurring (three times, in at least two chats) is
+  promoted into the agent's system prompt so the error is prevented. A lesson
+  whose hint does not lead to a working call is retired, and a prompt lesson
+  that does not prevent the error, or is not seen for 60 days, goes back to
+  being a hint.
+- **Where to see and delete them** — Settings → Agents → pick an agent →
+  **Lessons**: each lesson with its state (hint, prompt, retired), the tool,
+  what happened and how often. Delete any you do not want. The Lessons list appears once the agent has
+  at least one lesson; the **Learn from errors** toggle is always there.
+- **Scope** — a lesson belongs to the agent that made the error and applies
+  only to that tool. Lessons are stored under `$OMNIS_HOME/lessons/<agent>/`
+  (per user on a shared server; a chat whose owner cannot be identified gets
+  no lesson behaviour at all rather than the shared folder).
+- **Switching it off** — for one agent, turn off **Learn from errors** in its
+  settings; for everything, set `OMNIS_LESSONS=false` or `lessons: {"enabled":
+  false}` in `agents.json`. Off, nothing is added to any prompt or error.
+
 ## The StateLog (built during the session)
 
 While a session runs, the context-compression plugin maintains a compact digest

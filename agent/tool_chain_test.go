@@ -99,7 +99,9 @@ func TestSubAgentCallSiteArgumentOrderNotSwapped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read build_subagents.go: %v", err)
 	}
-	want := "beforeToolChain(callbacks.BeforeTool, hooksBeforeTool, permGate, budgetBeforeTool)"
+	// The events slot carries the lessons start-time recorder, which never
+	// short-circuits; the policy order after it is unchanged.
+	want := "beforeToolChain(chainBeforeTool(callbacks.BeforeTool, lessonBefore), hooksBeforeTool, permGate, budgetBeforeTool)"
 	if !strings.Contains(string(src), want) {
 		t.Fatalf("could not find the call expression %q — update this guard with the code", want)
 	}

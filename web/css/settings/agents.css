@@ -705,3 +705,24 @@ details[open] > .agent-advanced-summary::before { transform: rotate(90deg); }
 #squad-detail-panel > * { flex-shrink: 0; }
 
 
+
+/* Lessons learned from tool errors (Agents → detail → Lessons). */
+.agent-lessons-intro { margin: 0 0 0.6rem; font-size: 0.8rem; color: var(--text-muted); }
+.agent-lessons-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.agent-lesson-row {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border); border-radius: var(--radius-sm, 6px);
+  font-size: 0.8rem; color: var(--text);
+}
+.agent-lesson-badge {
+  flex-shrink: 0; padding: 0.05rem 0.45rem; border-radius: 999px;
+  border: 1px solid var(--border); font-size: 0.7rem; color: var(--text-muted);
+}
+.agent-lesson-badge.agent-lesson-prompt {
+  color: var(--accent); border-color: var(--accent-border-soft); background: var(--accent-bg-soft);
+}
+.agent-lesson-badge.agent-lesson-retired { opacity: 0.6; }
+.agent-lesson-tool { flex-shrink: 0; font-family: var(--font-mono, monospace); color: var(--text-muted); }
+.agent-lesson-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.agent-lesson-row .btn-small { flex-shrink: 0; }

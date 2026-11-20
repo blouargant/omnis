@@ -4439,6 +4439,45 @@ const BASE_PATH = window.BASE_PATH || "";
       genGrid.appendChild(resField);
     }
 
+    // Learn from errors — toggle. Opt-out default: checked unless explicitly
+    // disabled (lessons === false); ticking deletes the key, never writes true.
+    {
+      const lsnField = document.createElement("div");
+      lsnField.className = "agent-gen-field";
+      const lsnLbl = document.createElement("label");
+      lsnLbl.className = "agent-gen-label";
+      lsnLbl.textContent = tr("set.agent.lessons.title");
+      const lsnInfo = document.createElement("span");
+      lsnInfo.className = "agent-gen-info";
+      lsnInfo.textContent = "?";
+      lsnInfo.setAttribute("data-tip", tr("set.agent.lessons.toggleTip"));
+      lsnLbl.appendChild(lsnInfo);
+      const lsnRow = document.createElement("div");
+      lsnRow.className = "agent-toggle-row";
+      const lsnSwitch = document.createElement("label");
+      lsnSwitch.className = "agent-toggle-switch";
+      const lsnCb = document.createElement("input");
+      lsnCb.type = "checkbox";
+      lsnCb.className = "agent-toggle-input";
+      lsnCb.checked = a.lessons !== false;
+      lsnCb.addEventListener("change", () => {
+        if (lsnCb.checked) delete a.lessons; else a.lessons = false;
+        onChange();
+      });
+      const lsnSlider = document.createElement("span");
+      lsnSlider.className = "agent-toggle-slider";
+      lsnSwitch.appendChild(lsnCb);
+      lsnSwitch.appendChild(lsnSlider);
+      const lsnText = document.createElement("span");
+      lsnText.className = "agent-toggle-text";
+      lsnText.textContent = tr("set.agent.lessons.toggle");
+      lsnRow.appendChild(lsnSwitch);
+      lsnRow.appendChild(lsnText);
+      lsnField.appendChild(lsnLbl);
+      lsnField.appendChild(lsnRow);
+      genGrid.appendChild(lsnField);
+    }
+
     // ── Team (subagents) ──
     // This agent's OWN delegable team, mounted as tools exactly as a squad leader
     // mounts its members. It is how an expensive specialist pushes bulk retrieval
@@ -4458,6 +4497,29 @@ const BASE_PATH = window.BASE_PATH || "";
     teamSec.appendChild(teamBody);
     teamSec._foldCount = () => (a.subagents || []).length;
     body.appendChild(teamSec);
+
+    // ── Lessons (learned from tool errors) ── shown only when the agent has any.
+    // Not part of the config form: deleting one never marks the form dirty.
+    if (a.name) {
+      const lessonsSec = document.createElement("section");
+      lessonsSec.className = "agent-detail-section";
+      lessonsSec.hidden = true;
+      const lessonsHdr = document.createElement("div");
+      lessonsHdr.className = "agent-section-hdr";
+      lessonsHdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.3h6c0-1 .4-1.8 1-2.3A7 7 0 0 0 12 2z"/></svg><h3>${escHtml(tr("set.agent.lessons.title"))}</h3>`;
+      lessonsSec.appendChild(lessonsHdr);
+      const lessonsBody = document.createElement("div");
+      lessonsBody.className = "agent-block-body";
+      lessonsSec.appendChild(lessonsBody);
+      let lessonCount = 0;
+      lessonsSec._foldCount = () => lessonCount;
+      teamSec.insertAdjacentElement("afterend", lessonsSec);
+      renderAgentLessonsBlock(lessonsBody, a.name, (n) => {
+        lessonCount = n;
+        lessonsSec.hidden = n === 0;
+        foldCountUpdaters.forEach(u => u());
+      });
+    }
 
     // ── Skills ──
     const skillsSec = document.createElement("section");
@@ -6394,6 +6456,69 @@ const BASE_PATH = window.BASE_PATH || "";
       return subs.some(walk);
     };
     return (Array.isArray(byName.get(fromName.toLowerCase())?.subagents) ? byName.get(fromName.toLowerCase()).subagents : []).some(walk);
+  }
+
+  // Lessons an agent learned from its own tool errors: read-only list with a
+  // delete per row. Independent of the config form (no onChange, never dirty).
+  // onCount(n) tells the section how many remain (0 hides it).
+  async function renderAgentLessonsBlock(container, agentName, onCount) {
+    let list = [];
+    try {
+      const res = await apiFetch(`/api/agents/${encodeURIComponent(agentName)}/lessons`);
+      if (res.ok) list = (await res.json()).lessons || [];
+    } catch (_) { /* no list: the section stays hidden */ }
+    container.innerHTML = "";
+    if (!list.length) { onCount(0); return; }
+    const intro = document.createElement("p");
+    intro.className = "agent-lessons-intro";
+    intro.textContent = tr("set.agent.lessons.intro");
+    container.appendChild(intro);
+    const rows = document.createElement("div");
+    rows.className = "agent-lessons-list";
+    container.appendChild(rows);
+    const fmt = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString(I18N.locale); };
+    let remaining = list.length;
+    for (const l of list) {
+      const row = document.createElement("div");
+      row.className = "agent-lesson-row";
+      const state = ["hint", "prompt", "retired"].includes(l.state) ? l.state : "hint";
+      const badge = document.createElement("span");
+      badge.className = "agent-lesson-badge agent-lesson-" + state;
+      badge.textContent = tr("set.agent.lessons." + state);
+      const tool = document.createElement("span");
+      tool.className = "agent-lesson-tool";
+      tool.textContent = l.tool || "";
+      const txt = document.createElement("span");
+      txt.className = "agent-lesson-text";
+      txt.textContent = `${l.cue} → ${l.text}`;
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "btn-small btn-danger";
+      del.textContent = tr("set.agent.lessons.delete");
+      row.setAttribute("data-tip",
+        tr("set.agent.lessons.counters", { seen: l.seen, hinted: l.hinted, recovered: l.recovered, repeated: l.repeated }) +
+        `\n${fmt(l.created)} → ${fmt(l.last_seen)}`);
+      del.addEventListener("click", async () => {
+        const ok = await uiConfirm({
+          title: tr("set.agent.lessons.title"),
+          message: tr("set.agent.lessons.deleteConfirm"),
+          confirmText: tr("set.agent.lessons.delete"),
+          cancelText: tr("common.cancel"),
+          danger: true,
+        });
+        if (!ok) return;
+        try {
+          const res = await apiFetch(`/api/agents/${encodeURIComponent(agentName)}/lessons/${encodeURIComponent(l.id)}`, { method: "DELETE" });
+          if (!res.ok && res.status !== 404) return;
+        } catch (_) { return; }
+        row.remove();
+        remaining -= 1;
+        onCount(remaining);
+      });
+      row.append(badge, tool, txt, del);
+      rows.appendChild(row);
+    }
+    onCount(list.length);
   }
 
   function renderAgentTeamBlock(container, agent, allAgents, onChange) {

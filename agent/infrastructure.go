@@ -115,6 +115,11 @@ type Infrastructure struct {
 	// re-review — the correct fail-closed direction.
 	Attest *attest.Store
 
+	// Lessons adds lessons learned from earlier tool errors to failing tool
+	// results and queues failure→success episodes (see lessons_callbacks.go).
+	// Process-wide so it survives a hot-reload.
+	Lessons *lessonService
+
 	// MCPPool dedups MCP toolset construction so two agent generations that
 	// mount the same server share one subprocess. Each Instance acquires
 	// handles at build time and releases them when Close is called, so a
@@ -285,10 +290,15 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 		HookClearances:  permissions.NewClearances(),
 		PermModes:       permModes,
 		Attest:          attest.New(),
+		Lessons:         newLessonService(nil),
 		MCPPool:         mcpcfg.NewPool(mcpcfg.NewInputResolver(askUserReg)),
 		RouteDirectives: NewRouteRegistry(),
 		SpawnDirectives: NewSpawnRegistry(),
 	}
+	// The Bash tool reports each command's exit status to the lessons tracker
+	// (side channel; the model sees the same text). Installed while lessons are
+	// on; the Manager re-syncs it on every generation change.
+	infra.Lessons.syncBashObserver()
 	// Hooks report the session's permission mode on stdin.
 	hooks.SetPermissionModeResolver(func(sid string) string { return infra.PermissionModeFor(sid) })
 	return infra, nil
@@ -404,6 +414,7 @@ func (i *Infrastructure) Close() error {
 		return nil
 	}
 	i.shutdownLSP()
+	i.Lessons.Close()
 	// The event audit log outlives every agent generation (a hot-reload must not
 	// close a file the next generation keeps writing to), so it is closed here —
 	// at process shutdown — and nowhere else.

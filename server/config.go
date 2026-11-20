@@ -860,6 +860,11 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 						if a.ReadOnly {
 							agentMap["read_only"] = true
 						}
+						// Lessons are opt-out (on by default): surface the flag only when
+						// off, so an untouched save writes no `lessons` key.
+						if !a.Lessons {
+							agentMap["lessons"] = false
+						}
 						// Display-only (absent from the PUT allowlist): marks an agent
 						// that comes from a Claude Code plugin so the UI can badge it.
 						if a.Plugin != "" {
@@ -1058,7 +1063,7 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 								// team and its cap, handing retrieval back to the expensive
 								// model — the exact regression this feature exists to prevent.
 								"subagents", "max_tool_calls", "max_tool_calls_per_call",
-								"deferred_tools", "read_only":
+								"deferred_tools", "read_only", "lessons":
 								if isEmptyOverlayValue(v) {
 									continue
 								}

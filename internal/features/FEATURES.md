@@ -17,6 +17,10 @@
     * English only (release notes follow the same policy as the docs).
 -->
 
+## 2.3 (in development) — Agents learn from their tool errors
+
+- **Agents learn from their tool errors** — when a tool call fails and then works, the agent keeps a one-line lesson; the next time the same error appears the lesson is added to the error, and lessons that keep coming back are placed in the agent's prompt. See and delete them in Settings → Agents → an agent → Lessons; turn it off per agent with **Learn from errors**.
+
 ## 2.2 (in development) — Collection memory
 
 - **Permission mode per chat** — pick `default`, `acceptEdits`, `plan`, `auto`, `dontAsk` or `bypassPermissions` for each chat from the composer pastille, Shift+Tab or `/mode` (or `--permission-mode` in the terminal); `auto` lets a small model approve or block calls instead of asking, and hooks now see the mode.

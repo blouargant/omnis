@@ -39,6 +39,10 @@ var shellSplitRe = regexp.MustCompile(`[;&|\n]+`)
 // /dev/zero) as a dd output target or shell redirect target.
 var blockDeviceRe = regexp.MustCompile(`/dev/(sd[a-z]|nvme\d|vd[a-z]|hd[a-z]|mmcblk\d|disk\d)`)
 
+// SafetyFloorBlockedPrefix starts the Bash tool's text for a command the safety
+// floor refused (it never ran).
+const SafetyFloorBlockedPrefix = "Error: command blocked by safety floor"
+
 // SafetyFloorBlock reports whether command trips the hard safety floor,
 // returning a short reason. It is the single source of truth shared by RunBash,
 // RunBashInteractive, RunShellCaptured, and the bg queue so the floor can never
@@ -355,8 +359,23 @@ func NewShellCommand(ctx context.Context, command string) *exec.Cmd {
 	return newShellCommand(ctx, command)
 }
 func RunBash(ctx context.Context, in BashIn) (string, error) {
+	out, _, err := runBashStatus(ctx, in)
+	return out, err
+}
+
+// bashStatus is how a command ended: its exit code and whether it timed out.
+// ran is false when no command was started (safety floor, read-only refusal).
+type bashStatus struct {
+	ran      bool
+	exitCode int
+	timedOut bool
+}
+
+// runBashStatus is RunBash plus the command's exit status. The returned text is
+// exactly RunBash's.
+func runBashStatus(ctx context.Context, in BashIn) (string, bashStatus, error) {
 	if b, blocked := SafetyFloorBlock(in.Command); blocked {
-		return fmt.Sprintf("Error: command blocked by safety floor (%q)", b), nil
+		return fmt.Sprintf(SafetyFloorBlockedPrefix+" (%q)", b), bashStatus{}, nil
 	}
 	timeout := time.Duration(in.Timeout) * time.Second
 	if timeout <= 0 {
@@ -376,25 +395,47 @@ func RunBash(ctx context.Context, in BashIn) (string, error) {
 	}
 	if in.ReadOnly {
 		if msg := confineReadOnly(cmd, in.Command); msg != "" {
-			return msg, nil
+			return msg, bashStatus{}, nil
 		}
 	}
 	if len(in.Env) > 0 {
 		cmd.Env = append(os.Environ(), in.Env...)
 	}
-	cmd.WaitDelay = 5 * time.Second
+	cmd.WaitDelay = bashWaitDelay
 	out, err := cmd.CombinedOutput()
+	st := bashStatus{ran: true, exitCode: exitCodeOf(cmd, err)}
 	s := strings.TrimRight(string(out), "\n")
 	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
-		return fmt.Sprintf("Error: command timed out after %s\n%s", timeout, capCommandOutput(s)), nil
+		st.timedOut = true
+		return fmt.Sprintf("Error: command timed out after %s\n%s", timeout, capCommandOutput(s)), st, nil
 	}
 	if err != nil && s == "" {
-		return fmt.Sprintf("Error: %v", err), nil
+		return fmt.Sprintf("Error: %v", err), st, nil
 	}
 	if s == "" {
-		return "(no output)", nil
+		return "(no output)", st, nil
 	}
-	return capCommandOutput(s), nil
+	return capCommandOutput(s), st, nil
+}
+
+// bashWaitDelay is how long the Bash tool waits for the output pipes to close
+// once the shell has exited (a background child may hold them). A variable so
+// tests can shorten it.
+var bashWaitDelay = 5 * time.Second
+
+// exitCodeOf is the shell's own exit code once it has run: the process state's
+// code, which is 0 for a shell that exited cleanly even when Wait reports
+// exec.ErrWaitDelay because a background child kept the output pipe open, and
+// -1 when the shell was killed by a signal. Without a process state (the
+// command could not start) it is 0 for no error, else -1.
+func exitCodeOf(cmd *exec.Cmd, err error) int {
+	if cmd != nil && cmd.ProcessState != nil {
+		return cmd.ProcessState.ExitCode()
+	}
+	if err == nil {
+		return 0
+	}
+	return -1
 }
 
 // RunBashInteractive runs command through the platform shell with cwd as the
@@ -408,7 +449,7 @@ func RunBash(ctx context.Context, in BashIn) (string, error) {
 // the configured default. On any error newCwd falls back to the input cwd.
 func RunBashInteractive(ctx context.Context, command, cwd string, timeoutSec int) (output, newCwd string, err error) {
 	if b, blocked := SafetyFloorBlock(command); blocked {
-		return fmt.Sprintf("Error: command blocked by safety floor (%q)", b), cwd, nil
+		return fmt.Sprintf(SafetyFloorBlockedPrefix+" (%q)", b), cwd, nil
 	}
 	timeout := time.Duration(timeoutSec) * time.Second
 	if timeout <= 0 {

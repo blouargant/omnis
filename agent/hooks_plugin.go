@@ -236,7 +236,7 @@ func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hoo
 			case mode == permissions.ModeDontAsk:
 				state.RecordOutcome(sid, t.Name(), true)
 				return map[string]any{
-					"output": fmt.Sprintf("[BLOCKED BY HOOK] %s: dontAsk mode: the hook asked for confirmation", t.Name()),
+					"output": fmt.Sprintf(hookBlockPrefix+" %s: "+hookDontAskMarker+": the hook asked for confirmation", t.Name()),
 				}, nil
 			case mode == permissions.ModeAuto && perm.Judge != nil && (nonInteractive() || !perm.Modes.AutoEscalated(sid)):
 				// Same counters as the gate's auto path, so hook and gate
@@ -266,7 +266,7 @@ func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hoo
 			if !canEscalate(reg) {
 				state.RecordOutcome(sid, t.Name(), true)
 				return map[string]any{
-					"output": fmt.Sprintf("[BLOCKED BY HOOK] %s: %s (this run is unattended, so "+
+					"output": fmt.Sprintf(hookBlockPrefix+" %s: %s ("+hookUnattendedMarker+", so "+
 						"the escalation is refused rather than left waiting for an answer)",
 						t.Name(), reason),
 				}, nil
@@ -281,7 +281,7 @@ func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hoo
 			}
 			state.RecordOutcome(sid, t.Name(), true)
 			return map[string]any{
-				"output": fmt.Sprintf("[BLOCKED BY HOOK] %s: %s (the user declined)", t.Name(), reason),
+				"output": fmt.Sprintf(hookBlockPrefix+" %s: %s "+hookDeclinedSuffix, t.Name(), reason),
 			}, nil
 		}
 
@@ -292,7 +292,7 @@ func hookToolCallbacks(engine *hooks.Reloader, reg *askuser.Registry, state *hoo
 				reason = "blocked by PreToolUse hook"
 			}
 			return map[string]any{
-				"output": fmt.Sprintf("[BLOCKED BY HOOK] %s: %s", t.Name(), reason),
+				"output": fmt.Sprintf(hookBlockPrefix+" %s: %s", t.Name(), reason),
 			}, nil
 		}
 		if out.Decision == hooks.DecisionAllow {
@@ -488,3 +488,12 @@ type hookPermDeps struct {
 	Modes *permissions.ModeStore
 	Judge permissions.AutoJudge
 }
+
+// Markers of a PreToolUse hook block's output. The lesson classifier tells a
+// hook's own refusal (a failure) from a user/mode decision by them.
+const (
+	hookBlockPrefix      = "[BLOCKED BY HOOK]"
+	hookDontAskMarker    = "dontAsk mode"
+	hookUnattendedMarker = "this run is unattended"
+	hookDeclinedSuffix   = "(the user declined)"
+)

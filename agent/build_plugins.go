@@ -73,6 +73,16 @@ func buildPlugins(
 		return nil
 	}
 
+	// The lessons start-time recorder goes FIRST, ahead of the hooks,
+	// permission and budget plugins (as on sub-agents, where it rides in the
+	// events slot): a call that waits on a card or a validation hook must be
+	// stamped when it started, or it could close a sibling's failure it never
+	// benefited from. It always returns nil, nil, so it never short-circuits.
+	if !isRouterSquad && lessonsActive(runtime, rootCfg) {
+		if rp, rerr := lessonStartPlugin("lessons_start", infra.Lessons.BeforeTool(rootCfg.Name)); rerr == nil && rp != nil {
+			plugins = append(plugins, rp)
+		}
+	}
 	if eventsPlugin, err := bus.PluginWithOptions("events", events.PluginOptions{IncludeModelRequest: opts.DebugLogging}); err == nil {
 		plugins = append(plugins, eventsPlugin)
 	}
@@ -125,8 +135,14 @@ func buildPlugins(
 	// dedup, universal output shaper). Mounted on answering roots only (the
 	// router never runs fs/edit tools); a no-op until a tool result is large,
 	// a re-read is identical, or an edit touches a file with a running LSP.
+	// Lesson hints ride inside this plugin, after the shaper (see
+	// codingEfficiencyPlugin), so they are never cut.
 	if !isRouterSquad {
-		if cep, cepClean, cerr := codingEfficiencyPlugin("coding_efficiency", lspMgr, bus); cerr == nil && cep != nil {
+		var lessonAfter llmagent.AfterToolCallback
+		if lessonsActive(runtime, rootCfg) {
+			lessonAfter = infra.Lessons.AfterTool(rootCfg.Name)
+		}
+		if cep, cepClean, cerr := codingEfficiencyPlugin("coding_efficiency", lspMgr, bus, lessonAfter); cerr == nil && cep != nil {
 			plugins = append(plugins, cep)
 			if cepClean != nil {
 				extraCleanups = append(extraCleanups, cepClean)
@@ -154,6 +170,15 @@ func buildPlugins(
 	// workstream framing sits outermost, project specifics next.
 	if col, err := collectionCtxPlugin("collection_ctx", isRouterSquad); err == nil {
 		plugins = append(plugins, col)
+	}
+	// An agent's promoted lessons, appended to the root's system instruction
+	// (answering roots only; no prompt lesson ⇒ the request is untouched).
+	if !isRouterSquad && lessonsActive(runtime, rootCfg) {
+		if lb := infra.Lessons.BeforeModel(rootCfg.Name); lb != nil {
+			if lp, lerr := lessonsPlugin("lessons", lb); lerr == nil {
+				plugins = append(plugins, lp)
+			}
+		}
 	}
 	if cmp, _, _, err := compress.PluginWithTools("compress", compress.Config{
 		// Per-session audit file so concurrent users / sessions

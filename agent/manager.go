@@ -50,13 +50,20 @@ func NewManager(infra *Infrastructure, first *Instance) *Manager {
 		return nil
 	}
 	infra.installPluginHooks(first)
-	return &Manager{
+	m := &Manager{
 		infra:      infra,
 		currentGen: first.Generation,
 		genSeq:     first.Generation,
 		instances:  map[int]*managedInstance{first.Generation: {inst: first}},
 		sessionGen: map[string]int{},
 	}
+	// The lessons switch follows the CURRENT generation, so a hot-reload that
+	// turns lessons off also silences sessions draining on an older one.
+	if infra != nil {
+		infra.Lessons.setWriter(m.writeLesson)
+	}
+	m.syncLessonsSwitchLocked()
+	return m
 }
 
 // Infra exposes the underlying infrastructure (mailbox backend, registry,
@@ -93,6 +100,19 @@ func (m *Manager) repairCurrentLocked() {
 	}
 	if best != 0 {
 		m.currentGen = best
+		m.syncLessonsSwitchLocked()
+	}
+}
+
+// syncLessonsSwitchLocked hands the current generation's lessons switch to the
+// lesson service, which reads it with one atomic load on every tool and model
+// call. Called whenever currentGen changes. Caller holds m.mu (or owns m).
+func (m *Manager) syncLessonsSwitchLocked() {
+	if m.infra == nil || m.infra.Lessons == nil {
+		return
+	}
+	if mi := m.instances[m.currentGen]; mi != nil && mi.inst != nil {
+		m.infra.Lessons.setEnabledValue(mi.inst.Settings.LessonsEnabled)
 	}
 }
 
@@ -348,6 +368,7 @@ func (m *Manager) Reload(ctx context.Context, opts Options) (*Instance, error) {
 
 	m.instances[nextGen] = &managedInstance{inst: inst}
 	m.currentGen = nextGen
+	m.syncLessonsSwitchLocked()
 	// Only now — the generation is live — do the plugin hook layers follow it.
 	// Under m.mu, so two installs apply their layers in promotion order.
 	m.infra.installPluginHooks(inst)

@@ -325,7 +325,7 @@ func buildSquadInstance(
 			skillTS, leaderHandles, infra.MCPPool,
 			modelForAgent, subAgentCallbacks, codeIdx, regIdx, docIdx, sessIdx, infra.Attest, infra.SteerStore,
 			permGate.Callback, hooksBeforeTool, hooksAfterTool,
-			budgetBeforeTool, budgetAfterModel, timeNoteBeforeModel,
+			budgetBeforeTool, budgetAfterModel, timeNoteBeforeModel, infra.Lessons,
 		)
 		if berr != nil {
 			permGateClose()

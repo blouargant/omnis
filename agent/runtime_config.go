@@ -113,6 +113,10 @@ type AgentEntry struct {
 	// are limited to scratch paths, project-changing tools are removed. See
 	// agent/read_only.go.
 	ReadOnly bool `json:"read_only,omitempty"`
+	// Lessons switches agent lessons (hints learned from this agent's earlier
+	// tool errors) for this agent. Opt-out: nil (absent) ⇒ on; only an explicit
+	// false turns them off. See agent/lessons_callbacks.go.
+	Lessons *bool `json:"lessons,omitempty"`
 }
 
 // ProviderEntry describes one reusable provider profile in models.json.
@@ -252,10 +256,18 @@ type runtimeConfigFile struct {
 	// axis; both 0 makes turns unbounded (the pre-budget behaviour).
 	// Overridable by OMNIS_TURN_MAX_TOOL_CALLS / OMNIS_TURN_MAX_TOKENS.
 	TurnBudget *turnBudgetFile `json:"turn_budget,omitempty"`
+	// Lessons is the fleet-wide agent-lessons switch. Absent ⇒ on.
+	// OMNIS_LESSONS (when set) overrides it.
+	Lessons *lessonsFile `json:"lessons,omitempty"`
 	// Models is no longer a supported field in agents.json. It is detected
 	// here only to produce a clear migration error. Move the block to
 	// models.json (see RuntimeSettings.ModelsConfigPath).
 	LegacyModels json.RawMessage `json:"models,omitempty"`
+}
+
+// lessonsFile is the agents.json shape of the agent-lessons switch.
+type lessonsFile struct {
+	Enabled *bool `json:"enabled,omitempty"`
 }
 
 // turnBudgetFile is the agents.json shape of the per-turn spend ceiling.
@@ -348,6 +360,9 @@ type RuntimeAgentConfig struct {
 	DeferredTools []string
 	// ReadOnly is agent.json read_only (see AgentEntry.ReadOnly).
 	ReadOnly bool
+	// Lessons is agent.json lessons with its opt-out default applied (true
+	// unless explicitly false). The fleet-wide switch is RuntimeSettings.LessonsEnabled.
+	Lessons bool
 	// Plugin is the Claude Code plugin this agent comes from ("demo"), and
 	// PluginType its qualified Claude name ("demo:worker"); both "" for an
 	// agent that is not a plugin's.
@@ -437,6 +452,9 @@ type RuntimeSettings struct {
 	// the user is asked whether to continue; an unlimited value (both axes zero)
 	// disables the gate entirely. See internal/budget and agent/budget_plugin.go.
 	TurnBudget budget.Limits
+	// LessonsEnabled is the resolved fleet-wide agent-lessons switch:
+	// OMNIS_LESSONS (when set) > agents.json lessons.enabled > on.
+	LessonsEnabled bool
 }
 
 // AgentConfig returns the effective config for one agent name.
@@ -539,16 +557,19 @@ func defaultAgents() []RuntimeAgentConfig {
 			Name:    "leader",
 			Enabled: true,
 			Leader:  true,
+			Lessons: true,
 		},
 		{
 			Name:    "investigator",
 			Enabled: true,
 			Tools:   []string{"fs", "mcp"},
+			Lessons: true,
 		},
 		{
 			Name:    "summariser",
 			Enabled: true,
 			Tools:   []string{},
+			Lessons: true,
 		},
 	}
 }
@@ -797,6 +818,7 @@ func resolveAgentEntries(entries []AgentEntry, modelCatalog map[string]RuntimeMo
 			SubAgents:                         normalizeSubAgents(e.SubAgents),
 			DeferredTools:                     trimList(e.DeferredTools),
 			ReadOnly:                          e.ReadOnly,
+			Lessons:                           e.Lessons == nil || *e.Lessons,
 		})
 	}
 	return out, nil
@@ -901,6 +923,7 @@ func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 		SubAgents:                         normalizeSubAgents(in.SubAgents),
 		DeferredTools:                     trimList(in.DeferredTools),
 		ReadOnly:                          in.ReadOnly,
+		Lessons:                           in.Lessons,
 		Plugin:                            in.Plugin,
 		PluginType:                        in.PluginType,
 	}
@@ -1393,6 +1416,7 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 			MaxToolCalls: budget.DefaultMaxToolCalls,
 			MaxTokens:    budget.DefaultMaxTokens,
 		},
+		LessonsEnabled: true,
 	}
 
 	explicitConfig := strings.TrimSpace(opts.ConfigPath) != ""
@@ -1450,6 +1474,9 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	}
 	// Per-turn spend ceiling. Each axis is set independently so a config can
 	// cap tokens but not tool calls (or vice-versa) by pinning the other to 0.
+	if l := cfg.Lessons; l != nil && l.Enabled != nil {
+		out.LessonsEnabled = *l.Enabled
+	}
 	if tb := cfg.TurnBudget; tb != nil {
 		if tb.MaxToolCalls != nil {
 			out.TurnBudget.MaxToolCalls = *tb.MaxToolCalls
@@ -1518,6 +1545,9 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 	// ENV
 	// Per-turn spend ceiling. `>= 0` (not `> 0`) so an explicit 0 is honoured as
 	// "no ceiling on this axis" — setting both to 0 restores unbounded turns.
+	if on, ok := lessonsEnvSwitch(); ok {
+		out.LessonsEnabled = on
+	}
 	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("OMNIS_TURN_MAX_TOOL_CALLS"))); err == nil && v >= 0 {
 		out.TurnBudget.MaxToolCalls = v
 	}
