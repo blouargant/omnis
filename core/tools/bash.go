@@ -355,8 +355,23 @@ func NewShellCommand(ctx context.Context, command string) *exec.Cmd {
 	return newShellCommand(ctx, command)
 }
 func RunBash(ctx context.Context, in BashIn) (string, error) {
+	out, _, err := runBashStatus(ctx, in)
+	return out, err
+}
+
+// bashStatus is how a command ended: its exit code and whether it timed out.
+// ran is false when no command was started (safety floor, read-only refusal).
+type bashStatus struct {
+	ran      bool
+	exitCode int
+	timedOut bool
+}
+
+// runBashStatus is RunBash plus the command's exit status. The returned text is
+// exactly RunBash's.
+func runBashStatus(ctx context.Context, in BashIn) (string, bashStatus, error) {
 	if b, blocked := SafetyFloorBlock(in.Command); blocked {
-		return fmt.Sprintf("Error: command blocked by safety floor (%q)", b), nil
+		return fmt.Sprintf("Error: command blocked by safety floor (%q)", b), bashStatus{}, nil
 	}
 	timeout := time.Duration(in.Timeout) * time.Second
 	if timeout <= 0 {
@@ -376,7 +391,7 @@ func RunBash(ctx context.Context, in BashIn) (string, error) {
 	}
 	if in.ReadOnly {
 		if msg := confineReadOnly(cmd, in.Command); msg != "" {
-			return msg, nil
+			return msg, bashStatus{}, nil
 		}
 	}
 	if len(in.Env) > 0 {
@@ -384,17 +399,34 @@ func RunBash(ctx context.Context, in BashIn) (string, error) {
 	}
 	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
+	st := bashStatus{ran: true, exitCode: exitCodeOf(err)}
 	s := strings.TrimRight(string(out), "\n")
 	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
-		return fmt.Sprintf("Error: command timed out after %s\n%s", timeout, capCommandOutput(s)), nil
+		st.timedOut = true
+		return fmt.Sprintf("Error: command timed out after %s\n%s", timeout, capCommandOutput(s)), st, nil
 	}
 	if err != nil && s == "" {
-		return fmt.Sprintf("Error: %v", err), nil
+		return fmt.Sprintf("Error: %v", err), st, nil
 	}
 	if s == "" {
-		return "(no output)", nil
+		return "(no output)", st, nil
 	}
-	return capCommandOutput(s), nil
+	return capCommandOutput(s), st, nil
+}
+
+// exitCodeOf maps a command's Wait error to an exit code: 0 for none, the
+// process's code when it exited, -1 when it could not run or was killed.
+func exitCodeOf(err error) int {
+	if err == nil {
+		return 0
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		if c := ee.ExitCode(); c >= 0 {
+			return c
+		}
+	}
+	return -1
 }
 
 // RunBashInteractive runs command through the platform shell with cwd as the

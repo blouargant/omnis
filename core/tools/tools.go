@@ -22,7 +22,8 @@ func New() []tool.Tool {
 			func(ctx adk.ToolContext, in BashIn) (BashOut, error) {
 				in.Cwd = sessionCwd(ctx)
 				in.Env = ShellEnvFrom(ctx)
-				out, _ := RunBash(context.Background(), in)
+				out, st, _ := runBashStatus(context.Background(), in)
+				notifyBashExit(ctx, st)
 				return BashOut{Output: out}, nil
 			}),
 		mustTool("Read",
