@@ -51,7 +51,8 @@ to approve it, and no question or card is ever shown.
   being a hint.
 - **Where to see and delete them** — Settings → Agents → pick an agent →
   **Lessons**: each lesson with its state (hint, prompt, retired), the tool,
-  what happened and how often. Delete any you do not want.
+  what happened and how often. Delete any you do not want. The Lessons list appears once the agent has
+  at least one lesson; the **Learn from errors** toggle is always there.
 - **Scope** — a lesson belongs to the agent that made the error and applies
   only to that tool. Lessons are stored under `$OMNIS_HOME/lessons/<agent>/`
   (per user on a shared server).

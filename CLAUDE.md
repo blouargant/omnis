@@ -4504,8 +4504,8 @@ where prose can be skipped — not its offline replay of tasks.
   `CUE:`/`LESSON:` lines, each ≤ 300 runes, else rejected. `NONE` is remembered
   per (agent, signature) for 24 h (`lessonNoneTTL`, bounded map). At most 3 writer
   calls per run (`lessonMaxPerRun`; NONE and failed calls count). 200 lessons per
-  agent: a new one evicts the least-seen retired, else hint, lesson;
-  `ErrFull` when all are prompt lessons.
+  agent: a new one evicts the least-seen retired lesson, else the least-seen hint
+  lesson; a prompt lesson is never evicted (`ErrFull` when all are prompt lessons).
 - **Guards against injected text.** The "what worked" shown later is the
   **arguments of the call the agent really made and that succeeded** (already
   through hooks/permissions), never prose from a tool output; lesson text goes
@@ -4567,7 +4567,7 @@ where prose can be skipped — not its offline replay of tasks.
   prompt block is ordered by the `seen` value frozen when the lesson entered the
   prompt (then id), NOT the live `seen`: a counter-only update must not reorder
   or change the block, or the system prompt (and the prompt cache) would change
-  on every error. The ledger's earlier "most seen first" was a cache bug.
+  on every error. (Ordering by live `seen` would have been a prompt-cache bug.)
 - **Switches** (default on): `lessons: {enabled}` in `agents.json`
   (`RuntimeSettings.LessonsEnabled`), `OMNIS_LESSONS=false` (overrides it), and
   per agent `"lessons": false` in `agent.json` (`RuntimeAgentConfig.Lessons`,
@@ -4580,7 +4580,8 @@ where prose can be skipped — not its offline replay of tasks.
 - **Settings and routes**: Settings → Agents → an agent → **Lessons**
   ([web/settings.js](web/settings.js)): read-only list (state badge, tool,
   cue → text, counters in the tooltip) + a delete button per lesson + the
-  "Learn from errors" toggle. `GET /api/agents/:name/lessons` → `{lessons}`
+  "Learn from errors" toggle. The Lessons list appears only once the agent has
+  at least one lesson; the toggle is always there. `GET /api/agents/:name/lessons` → `{lessons}`
   (empty, never 404), `DELETE /api/agents/:name/lessons/:id` (404 when absent),
   owner-scoped in cookie mode ([server/lessons.go](server/lessons.go)). No
   approval step. One log line per lesson written / promoted / demoted / retired
@@ -4624,10 +4625,12 @@ where prose can be skipped — not its offline replay of tasks.
 - **Known limits:** same-tool resolution only; one lesson per (agent,
   signature) — no sharing between agents; no learning without an error (a wrong
   answer nobody flagged goes to collection memory); a one-line lesson can still
-  be biased by a crafted error message (see residual risk). Deferred review notes
-  (secret regex gaps, `Error`-prefixed successes read as errors, `firstWord`
-  ignoring wrapper flags such as `sudo -u`) are tracked in
-  `.superpowers/sdd/2026-11-20-agent-lessons/progress.md`.
+  be biased by a crafted error message (see residual risk). Also: the secret regex has the gaps listed
+  above; a successful result whose text merely starts with `Error` (e.g.
+  `Errors in …`) is read as an error; `firstWord` skips `sudo`/`env`/`timeout`/
+  `nice`/`nohup`/`time` but not their flags, so `sudo -u bob kubectl` has tool
+  key `Bash:-u`. The shipped lifecycle constants are untuned: revisit them with
+  the lessons bench in omnis-benches (`squad-bench/tasks-lessons.json`).
 
 ### Automatic session titling (Web UI)
 

@@ -181,8 +181,9 @@ the error).
 
 The per-user root is resolved from the session the way the collection plugin
 does it (`collectionRoot(sessionID)`), and from the caller on the routes
-(`userRoot`). When several calls of one model response run in parallel, "the
-next call" is the next one to complete.
+(`userRoot`). When several calls of one model response run in parallel, a call counts as
+"the next call" only if it started after the failure completed (for an
+outcome: after the hint was delivered).
 
 ### 6. Delivery
 
@@ -213,8 +214,8 @@ live `seen`, which would reorder the block on every error.
 
 ### 7. Promotion and retirement
 
-Constants (the values below are the ones shipped; the bench did not change
-them):
+Constants (the values shipped; the bench in omnis-benches,
+`squad-bench/tasks-lessons.json`, is where to revisit them):
 
 - **Promote** `hint` → `prompt`: `seen` ≥ 3 across ≥ 2 sessions. The agent keeps
   walking into it.
