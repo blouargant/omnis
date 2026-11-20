@@ -4480,26 +4480,45 @@ where prose can be skipped — not its offline replay of tasks.
   `ErrorHandler`), or a `[BLOCKED BY HOOK]` result. **Neither** (decisions, not
   mistakes, and no proof the arguments work, since the call never ran):
   `permissions.DeniedPrefix`, `permissions.AutoBlockPrefix`, the budget halt,
-  per-agent cap and per-call cap notices (`isDecisionRefusal`, the prefix
-  constants are exported/shared, never hand copies), and a hook block the user
-  declined or that `dontAsk` / an unattended run refused. A "neither" call opens
+  per-agent cap and per-call cap notices, a Bash command the safety floor
+  (`fstools.SafetyFloorBlockedPrefix`) or a read-only agent's confinement
+  (`fstools.ReadOnlyRefusedPrefix`) refused before it started
+  (`isDecisionRefusal`, the prefix constants are exported/shared, never hand
+  copies), and a hook block the user declined or that `dontAsk` / an
+  unattended run refused. A "neither" call opens
   no episode, closes none, settles no pending hint and is not counted as `seen`:
   counting a card the user denied as "the call that worked" would make the hint
   replay the denied command. **Everything else succeeded.**
 - **Bash exit status** (a side channel, the model's text is unchanged):
-  `fstools.SetBashExitObserver` ([core/tools/bash_exit.go](core/tools/bash_exit.go))
+  the Bash exit observer ([core/tools/bash_exit.go](core/tools/bash_exit.go))
   is told each command's exit code / timeout by the `Bash` tool and the
   read-only Bash (`runBashStatus`; `RunBash` returns the same string as before;
   a command the safety floor or the read-only check refused before starting is
-  not reported). The lesson service installs it while lessons are on and removes
-  it while they are off (`syncBashObserver`, so a disabled service costs the
-  Bash tool one nil check), and stores the status on the call's recorded start
+  not reported). The code is the **shell's own** (`cmd.ProcessState.ExitCode()`,
+  `exitCodeOf`): a command that backgrounds a child holding the output pipe
+  (`npm run dev &`) makes `Wait` return `exec.ErrWaitDelay` after a clean exit,
+  which is not an `ExitError` and used to read as -1 — a failure; -1 now means
+  only "never got a process state" or killed by a signal. The observer is
+  process-wide and **owned**: the lesson service installs it as itself while
+  lessons are on (`fstools.InstallBashExitObserver(s, …)`) and removes it while
+  they are off and on `Close` with `fstools.RemoveBashExitObserver(s)`, which
+  clears it only if it is still this service's, so one service never removes
+  another's (`syncBashObserver`; a disabled service costs the Bash tool one nil
+  check). It stores the status on the call's recorded start
   (`recordBashExit`; a call with no recorded start — an agent without lessons —
   is ignored, so nothing accumulates). With a status, a Bash call that ran is
   decided by it: non-zero or timed out ⇒ failed, its output as the error text;
-  **except exit 1** when the first word (`ToolKey`'s) is `grep`, `rg`, `egrep`,
-  `fgrep`, `diff`, `cmp`, `test` or `[` — their "no match" / "differs" answer —
-  which succeeded. Without a status (observer absent: CLI examples) the text
+  **except exit 1** when the program of the **last segment** of the command
+  (split on unquoted `|`, `&&`, `||`, `;`, newlines and `&` by
+  `permissions.SplitCompound`, wrappers skipped as in `ToolKey`) is `grep`,
+  `rg`, `egrep`, `fgrep`, `diff`, `cmp`, `test` or `[` — their "no match" /
+  "differs" answer — which succeeded: the shell returns the status of the last
+  command, so `kubectl get pods | grep foo` finding nothing is not a
+  `Bash:kubectl` failure (judged on the first word, it opened an episode whose
+  lesson matched every later kubectl pipe that found nothing). A non-timeout
+  failure with **nothing to learn from** — output empty, `(no output)`, or the
+  bare `Error: exit status N` the tool prints for a silent failure — is
+  **neither**. Without a status (observer absent: CLI examples) the text
   decides as for any tool. Why: `RunBash` returns a failing command's output
   with no error marker, so `fatal: not a git repository` or a failing test run
   used to read as a success — and could close an episode with arguments that
@@ -4515,8 +4534,12 @@ where prose can be skipped — not its offline replay of tasks.
   placeholders; first 200 chars kept); lesson id = its first 12 hex. A path is
   anything after a non-path character (start, space, `(`, `=`, `:`…) that is
   absolute or `./`/`../`, relative with a directory (`src/main.go`), or a file
-  name with an extension (`prices.go`), so the same mistake on two files has one
-  signature (on CLI/TUI the fs tools print relative paths). Timestamps run before
+  name whose extension is a known file extension (`prices.go`, `notes.md`; the
+  `fileExtensions` set — go, py, js, ts, json, yaml, md, txt, sh, …), so the
+  same mistake on two files has one signature; a dotted name with another
+  ending is an identifier and stays (`undefined: strings.Builder` and
+  `undefined: http.Client`, `deployments.apps` and `statefulsets.apps` differ).
+  (On CLI/TUI the fs tools print relative paths.) Timestamps run before
   hex/digit runs, or their digits would be split first. Repeated failures with
   the same signature count as attempts of one open failure; the success closes
   it. Arguments are JSON and the error text is kept, each capped at 2000 chars.
@@ -4547,8 +4570,11 @@ where prose can be skipped — not its offline replay of tasks.
   password/passwd/secret/token/api key/authorization followed by `=`/`:` (also
   JSON `"password":"x"` and escaped quotes); a long flag `--password`/`--passwd`/
   `--secret`/`--token`/`--api-key`/`--apikey` followed by a space and a value
-  (not `-p`, which is a port as often as a password); an environment-style name
-  ending in `_SECRET`/`_KEY`/`_TOKEN`/`_PASSWORD` followed by `=`;
+  (not `-p`, which is a port as often as a password); an **upper-case**
+  environment-style name with a `_SECRET`/`_KEY`/`_TOKEN`/`_PASSWORD`/`_PASSWD`
+  part followed by `=` (`AWS_SECRET_ACCESS_KEY=`, `DB_PASSWORD=`,
+  `MY_SECRET_VALUE=`) — case-sensitive for that branch only (`(?-i:…)`), so code
+  edits such as `primary_key=True`, `cache_key = x`, `sort_key=` pass;
   `user:password@host` in a URL; `bearer <8+>`, `sk-…`, `ghp_`/`gho_`/
   `github_pat_` tokens, a PEM private key header. Such an episode is never sent
   to the model, never stored. `export GOFLAGS=-mod=mod`, `git push origin main`,

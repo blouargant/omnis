@@ -38,8 +38,10 @@ to approve it, and no question or card is ever shown.
 
 - **When one is learned** — only after an error followed by a success of the
   same tool, in the same run. For a shell command, an error is a non-zero exit
-  status (except `grep`, `diff`, `test` and similar commands answering "no
-  match" with status 1). A failure the agent never recovered from never creates
+  status (except status 1 when the last command of the line is `grep`, `diff`,
+  `test` or a similar command answering "no match"), and a failure with no
+  output teaches nothing. A command refused by the safety floor is not an
+  error either. A failure the agent never recovered from never creates
   a lesson. A refusal — yours on a permission card, a permission rule, an
   auto-mode block, a budget notice — is neither an error nor a success: it never
   creates a lesson, and a call you refused is never recorded as "the arguments

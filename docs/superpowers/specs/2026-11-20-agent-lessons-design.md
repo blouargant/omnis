@@ -77,19 +77,28 @@ Observed by the host, per tool call:
   with `Error:`, `Error <text>`, `error:` or `error <text>` — not `Errors in…`
   nor `ErrorHandler` —, or a result map with a non-empty `error`);
 - a `Bash` command that exited non-zero or timed out (the exit status reaches
-  the host through a side channel, `fstools.SetBashExitObserver`; the text the
-  model sees is unchanged), except exit status 1 from `grep`, `rg`, `egrep`,
-  `fgrep`, `diff`, `cmp`, `test` or `[`, which is their "no match" / "differs"
-  answer. A Bash call with no reported status is judged on its text;
+  the host through a side channel, the Bash exit observer; the text the model
+  sees is unchanged). The status is the shell's own exit code, so a command
+  that leaves a background child holding its output (`npm run dev &`) and exits
+  0 is a success. Exit status 1 is not a failure when the command the shell ran
+  **last** — the last segment of a pipeline or of a `&&` / `||` / `;` chain,
+  split outside quotes — is `grep`, `rg`, `egrep`, `fgrep`, `diff`, `cmp`,
+  `test` or `[`: that is their "no match" / "differs" answer, and the shell
+  returns the last command's status (`kubectl get pods | grep foo` finding
+  nothing is not a kubectl error). A Bash call with no reported status is
+  judged on its text;
 - a call blocked by a hook (`[BLOCKED BY HOOK]`).
 
 A call is then one of three things: failed, succeeded, or **neither**. Neither:
 a user's deny on a permission card, a permission `deny` rule, an auto-mode
-block, a budget or cap notice, and a hook block the user declined or that
+block, a budget or cap notice, a Bash command the safety floor or a read-only
+agent's confinement refused, and a hook block the user declined or that
 `dontAsk` or an unattended run refused. These are decisions, not mistakes to
 learn around, and the call never ran, so it proves nothing about its
 arguments: it opens no episode, closes none, settles no pending hint and is not
-counted as an occurrence.
+counted as an occurrence. A Bash failure with no output (empty, `(no output)`,
+or the bare `Error: exit status N`) is neither too: there is nothing in it to
+learn from.
 
 ### 2. The episode
 
@@ -108,8 +117,10 @@ later call of that tool that succeeded. Without a success there is no episode.
   strings, timestamps, paths, UUIDs, hex ids and numbers replaced by
   placeholders, timestamps before hex and digit runs; whitespace collapsed;
   first 200 chars), hashed. A path is absolute or `./`/`../`, relative with a
-  directory, or a file name with an extension, after any non-path character
-  (`(`, `=`, `:`…), so the same mistake on two files gives one signature. Lessons are keyed by (agent,
+  directory, or a file name with a known file extension (`.go`, `.py`, `.md`,
+  `.yaml`, …), after any non-path character (`(`, `=`, `:`…), so the same
+  mistake on two files gives one signature; a dotted identifier
+  (`strings.Builder`, `deployments.apps`) is not a path and stays. Lessons are keyed by (agent,
   signature); the lesson id is the first 12 hex characters.
 
 No episode is recorded in a turn where memory is read-only (`memoryReadOnly`):
@@ -156,8 +167,10 @@ So:
   pattern is dropped before any model call: password/passwd/secret/token/
   api key/authorization followed by `=` or `:` (JSON-shaped and escaped quotes
   included), `--password`/`--passwd`/`--secret`/`--token`/`--api-key`/`--apikey`
-  followed by a value, an environment-style name ending in `_SECRET`, `_KEY`,
-  `_TOKEN` or `_PASSWORD` followed by `=`, `user:password@host` in a URL,
+  followed by a value, an upper-case environment-style name with a `_SECRET`,
+  `_KEY`, `_TOKEN`, `_PASSWORD` or `_PASSWD` part followed by `=`
+  (`AWS_SECRET_ACCESS_KEY=`; matched case-sensitively, so code such as
+  `primary_key=True` is not taken for a secret), `user:password@host` in a URL,
   `bearer <token>`, `sk-…` keys, `ghp_`/`gho_`/`github_pat_` tokens, a PEM
   private key header. Fence
   markers inside the data sent to the writer are neutralised so it cannot close
