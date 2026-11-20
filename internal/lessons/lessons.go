@@ -75,6 +75,7 @@ type Lesson struct {
 	Seen, Hinted, Recovered, Repeated, SeenInPrompt int
 	SessionIDs                                      []string // distinct, at most 8 kept
 	Outcomes                                        []bool   // last RetireWindow hint outcomes, true = recovered
+	PromptFailed                                    bool     // demoted because the prompt did not prevent the failure; never promoted again
 }
 
 // Store reads and writes lesson files under one root directory.
@@ -323,6 +324,9 @@ func render(l Lesson) string {
 		}
 		fmt.Fprintf(&b, "outcomes: %s\n", o.String())
 	}
+	if l.PromptFailed {
+		b.WriteString("prompt_failed: true\n")
+	}
 	fmt.Fprintf(&b, "---\n\nCue: %s\nText: %s\n", l.Cue, l.Text)
 	for _, blk := range []struct{ name, body string }{{"Failed", l.Failed}, {"Worked", l.Worked}} {
 		if blk.body == "" {
@@ -411,6 +415,8 @@ func parse(text string) (Lesson, bool) {
 					l.SessionIDs = append(l.SessionIDs, sid)
 				}
 			}
+		case "prompt_failed":
+			l.PromptFailed = v == "true"
 		case "outcomes":
 			for _, r := range v {
 				l.Outcomes = append(l.Outcomes, r == '1')
