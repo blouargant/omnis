@@ -110,6 +110,10 @@ func splitCompound(cmd string) []string {
 	return out
 }
 
+// SplitCompound is splitCompound for other packages: the subcommands of a shell
+// command line, split on unquoted &&, ||, |&, ;, newlines, | and &, in order.
+func SplitCompound(cmd string) []string { return splitCompound(cmd) }
+
 // unquotedMask reports, for each byte of cmd, whether the shell reads it as
 // syntax: false inside single or double quotes (the quote characters
 // themselves included) and for a backslash escape and the byte it escapes

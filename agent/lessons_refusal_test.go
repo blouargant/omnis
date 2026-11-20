@@ -221,3 +221,19 @@ func TestUnresolvedOwnerSkipsLessons(t *testing.T) {
 		t.Fatal("no hint from the shared root without a resolver")
 	}
 }
+
+// A pipeline whose last command is a grep with no match opens no Bash:kubectl
+// episode; neither does a failure with no output.
+func TestBashPipeToGrepNoMatchOpensNoEpisode(t *testing.T) {
+	lessonEnv(t)
+	s := newLessonService(nil)
+	stopLessonWorker(s)
+	run := newLessonCtx("s1", "inv1")
+	bashCall(s, run.withCall("1"), "kubectl get pods | grep foo", "Error: exit status 1", 1)
+	bashCall(s, run.withCall("2"), "kubectl get pods -o name", "", 1)
+	time.Sleep(time.Millisecond)
+	bashCall(s, run.withCall("3"), "kubectl get pods", "NAME READY", 0)
+	if eps := drainEpisodes(s); len(eps) != 0 {
+		t.Fatalf("an uninformative or no-match exit opened an episode: %+v", eps)
+	}
+}

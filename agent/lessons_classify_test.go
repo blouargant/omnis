@@ -106,6 +106,18 @@ func TestBashExitStatusDecidesABashCall(t *testing.T) {
 		{"wrapped grep", "sudo grep x f", "(no output)", bashExit{code: 1}, callSucceeded},
 		{"timeout", "sleep 9", "Error: command timed out after 1s", bashExit{code: -1, timedOut: true}, callFailed},
 		{"grep timeout", "grep x f", "Error: command timed out after 1s", bashExit{code: 1, timedOut: true}, callFailed},
+		// The shell returns the status of the LAST command of a pipeline or chain.
+		{"kubectl piped to grep, no match", "kubectl get pods | grep foo", "Error: exit status 1", bashExit{code: 1}, callSucceeded},
+		{"kubectl piped to grep, (no output)", "kubectl get pods | grep foo", "(no output)", bashExit{code: 1}, callSucceeded},
+		{"cd then grep", "cd dir && grep x f", "(no output)", bashExit{code: 1}, callSucceeded},
+		{"cat piped to grep", "cat f | grep x", "(no output)", bashExit{code: 1}, callSucceeded},
+		{"grep piped to kubectl", "grep x f | kubectl apply -f -", "error: no objects passed to apply", bashExit{code: 1}, callFailed},
+		{"kubectl piped to bad grep", "kubectl get pods | grep -E '('", "grep: Unmatched ( or \\(", bashExit{code: 2}, callFailed},
+		{"quoted pipe, false last", `echo "a | grep b"; false`, "a | grep b", bashExit{code: 1}, callFailed},
+		// A failure with nothing to learn from is neither.
+		{"quoted pipe, false last, no output", `echo -n ""; false`, "(no output)", bashExit{code: 1}, callNeither},
+		{"bare exit status", "false", "Error: exit status 1", bashExit{code: 1}, callNeither},
+		{"empty output", "make", "", bashExit{code: 2}, callNeither},
 	}
 	for _, c := range cases {
 		e := c.exit

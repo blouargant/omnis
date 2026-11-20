@@ -74,26 +74,44 @@ func classifyToolCall(name string, args, result map[string]any, err error, exit 
 	return "", callSucceeded
 }
 
+// reBareExitStatus is the Bash tool's text for a command that failed with no
+// output: "Error: exit status N".
+var reBareExitStatus = regexp.MustCompile(`^Error: exit status -?\d+$`)
+
 // classifyBashExit decides a Bash call from its exit status: non-zero or a
-// timeout is a failure, except exit 1 from a command whose 1 means "no match"
-// or "differs".
+// timeout is a failure, except exit 1 when the command the shell ran last (the
+// last segment of a pipeline or of a && / || / ; chain) answers "no match" or
+// "differs" with 1. A failure with no output to learn from (empty, "(no
+// output)", or the bare "Error: exit status N") is neither: it opens no
+// episode and settles nothing.
 func classifyBashExit(args, result map[string]any, text string, exit bashExit) (string, callOutcome) {
 	if !exit.timedOut && exit.code == 0 {
 		return "", callSucceeded
 	}
-	if !exit.timedOut && exit.code == 1 {
-		if w := strings.TrimPrefix(lessons.ToolKey("Bash", args), "Bash:"); bashNoMatchCommands[w] {
-			return "", callSucceeded
-		}
+	if !exit.timedOut && exit.code == 1 && bashNoMatchCommands[lastBashCommand(args)] {
+		return "", callSucceeded
 	}
 	errText := text
 	if out, ok := result["output"].(string); ok {
 		errText = strings.TrimSpace(out)
 	}
-	if errText == "" {
-		errText = fmt.Sprintf("exit status %d", exit.code)
+	if !exit.timedOut && (errText == "" || errText == "(no output)" || reBareExitStatus.MatchString(errText)) {
+		return "", callNeither
 	}
 	return errText, callFailed
+}
+
+// lastBashCommand is the program of the last segment of a Bash call's command
+// (split on unquoted |, &&, ||, ; and newlines), wrappers skipped: the shell
+// returns that segment's exit status.
+func lastBashCommand(args map[string]any) string {
+	cmd, _ := args["command"].(string)
+	segs := permissions.SplitCompound(cmd)
+	if len(segs) == 0 {
+		return ""
+	}
+	last := segs[len(segs)-1]
+	return strings.TrimPrefix(lessons.ToolKey("Bash", map[string]any{"command": last}), "Bash:")
 }
 
 // isDecisionRefusal reports whether s is a refusal that is not the agent's
