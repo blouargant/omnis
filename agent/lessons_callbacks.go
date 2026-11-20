@@ -19,6 +19,7 @@ import (
 
 	"github.com/blouargant/omnis/core/adk"
 	"github.com/blouargant/omnis/core/events"
+	fstools "github.com/blouargant/omnis/core/tools"
 	"github.com/blouargant/omnis/internal/lessons"
 	"github.com/blouargant/omnis/internal/paths"
 )
@@ -54,15 +55,18 @@ type lessonService struct {
 	closed  atomic.Bool
 	now     func() time.Time
 
-	enabledMu sync.RWMutex
-	enabledFn func() bool
+	// switchState is the fleet-wide switch: 0 = not set yet (enabledFn, else
+	// OMNIS_LESSONS, default on), 1 = on, 2 = off. The Manager sets it whenever
+	// the current generation changes, so reading it is one atomic load.
+	switchState atomic.Int32
+	enabledFn   func() bool // tests only; read when switchState is 0
 
 	mu      sync.Mutex
 	pending map[pendingHintKey]pendingHint
 	seq     uint64
 
 	startsMu sync.Mutex
-	starts   map[callKey]time.Time
+	starts   map[callKey]callStart
 
 	// The writer worker: one goroutine consuming the queue.
 	ctx    context.Context
@@ -83,6 +87,13 @@ type lessonService struct {
 // and taken by AfterTool.
 type callKey struct{ session, invocation, call string }
 
+// callStart is what is known about a call before its after-tool callback: when
+// it started and, for Bash, the exit status the tool reported.
+type callStart struct {
+	at   time.Time
+	exit *bashExit
+}
+
 type pendingHintKey struct {
 	run     runKey
 	toolKey string
@@ -96,16 +107,16 @@ type pendingHint struct {
 	at      time.Time // when the hint was delivered
 }
 
-// newLessonService builds the service. enabled reports the fleet-wide switch
-// at call time; nil ⇒ the OMNIS_LESSONS env var, default on (setEnabled
-// replaces it once a Manager exists).
+// newLessonService builds the service. enabled, when non-nil, answers the
+// fleet-wide switch until setEnabledValue is called (tests); nil ⇒ the
+// OMNIS_LESSONS env var, default on.
 func newLessonService(enabled func() bool) *lessonService {
 	s := &lessonService{
 		queue:     make(chan lessonEpisode, lessonQueueCap),
 		now:       time.Now,
 		enabledFn: enabled,
 		pending:   map[pendingHintKey]pendingHint{},
-		starts:    map[callKey]time.Time{},
+		starts:    map[callKey]callStart{},
 		none:      map[noneKey]lessonStamp{},
 		runs:      map[runCountKey]lessonStamp{},
 		done:      make(chan struct{}),
@@ -116,29 +127,47 @@ func newLessonService(enabled func() bool) *lessonService {
 	return s
 }
 
-// setEnabled installs the fleet-wide switch read at call time. NewManager sets
-// it to read the CURRENT generation's resolved settings, so a hot-reload that
-// turns lessons off silences sessions still draining on an older generation.
-func (s *lessonService) setEnabled(f func() bool) {
+// setEnabledValue sets the fleet-wide switch. The Manager calls it with the
+// CURRENT generation's resolved setting whenever that generation changes, so a
+// hot-reload that turns lessons off also silences sessions still draining on an
+// older generation. It also installs or removes the Bash exit observer.
+func (s *lessonService) setEnabledValue(on bool) {
 	if s == nil {
 		return
 	}
-	s.enabledMu.Lock()
-	s.enabledFn = f
-	s.enabledMu.Unlock()
+	if on {
+		s.switchState.Store(1)
+	} else {
+		s.switchState.Store(2)
+	}
+	s.syncBashObserver()
 }
 
 func (s *lessonService) isEnabled() bool {
-	s.enabledMu.RLock()
-	f := s.enabledFn
-	s.enabledMu.RUnlock()
-	if f != nil {
-		return f()
+	switch s.switchState.Load() {
+	case 1:
+		return true
+	case 2:
+		return false
+	}
+	if s.enabledFn != nil {
+		return s.enabledFn()
 	}
 	if on, ok := lessonsEnvSwitch(); ok {
 		return on
 	}
 	return true
+}
+
+// syncBashObserver installs the Bash exit observer while lessons are on and
+// removes it while they are off, so a disabled service costs the Bash tool one
+// nil check.
+func (s *lessonService) syncBashObserver() {
+	if s.isEnabled() {
+		fstools.SetBashExitObserver(s.observeBashExit)
+	} else {
+		fstools.SetBashExitObserver(nil)
+	}
 }
 
 // lessonsEnvSwitch reads OMNIS_LESSONS; ok is false when it is unset or not a
@@ -164,17 +193,18 @@ func lessonsActive(runtime RuntimeSettings, cfg RuntimeAgentConfig) bool {
 }
 
 // rootFor returns the state root of a session's lessons: the owner's per-user
-// root in cookie mode, else the shared write root.
-func (s *lessonService) rootFor(sessionID string) string {
-	if root := collectionRoot(sessionID); root != "" {
-		return root
+// root in cookie mode, else the shared write root. ok is false when a per-user
+// root resolver is installed but cannot name the session's owner: lessons then
+// do nothing for that call rather than fall back to the shared root.
+func (s *lessonService) rootFor(sessionID string) (root string, ok bool) {
+	root, installed := collectionRootResolved(sessionID)
+	if root != "" {
+		return root, true
 	}
-	return paths.ConfigWriteDir()
-}
-
-// storeFor returns the lesson store of a session.
-func (s *lessonService) storeFor(sessionID string) *lessons.Store {
-	return lessons.In(s.rootFor(sessionID))
+	if installed {
+		return "", false
+	}
+	return paths.ConfigWriteDir(), true
 }
 
 // Close stops queueing episodes and stops the writer worker, waiting for it for
@@ -259,12 +289,12 @@ func (s *lessonService) BeforeTool(agent string) llmagent.BeforeToolCallback {
 func (s *lessonService) recordStart(k callKey, at time.Time) {
 	s.startsMu.Lock()
 	defer s.startsMu.Unlock()
-	s.starts[k] = at
+	s.starts[k] = callStart{at: at}
 	if len(s.starts) <= lessonStartsMax {
 		return
 	}
-	for key, t := range s.starts {
-		if at.Sub(t) > lessonStartTTL {
+	for key, st := range s.starts {
+		if at.Sub(st.at) > lessonStartTTL {
 			delete(s.starts, key)
 		}
 	}
@@ -272,26 +302,54 @@ func (s *lessonService) recordStart(k callKey, at time.Time) {
 		var oldest callKey
 		var min time.Time
 		first := true
-		for key, t := range s.starts {
-			if first || t.Before(min) {
-				oldest, min, first = key, t, false
+		for key, st := range s.starts {
+			if first || st.at.Before(min) {
+				oldest, min, first = key, st.at, false
 			}
 		}
 		delete(s.starts, oldest)
 	}
 }
 
-// takeStart returns and forgets a call's recorded start time, or fallback when
-// none was recorded (a callback earlier in the chain short-circuited the call).
-func (s *lessonService) takeStart(k callKey, fallback time.Time) time.Time {
+// recordBashExit attaches the exit status of a Bash call to its recorded start.
+// A call with no recorded start (an agent without lessons, a short-circuited
+// call) is ignored, so nothing accumulates for it.
+func (s *lessonService) recordBashExit(k callKey, exit bashExit) {
 	s.startsMu.Lock()
 	defer s.startsMu.Unlock()
-	t, ok := s.starts[k]
+	st, ok := s.starts[k]
 	if !ok {
-		return fallback
+		return
+	}
+	st.exit = &exit
+	s.starts[k] = st
+}
+
+// observeBashExit is the Bash exit observer installed in core/tools while
+// lessons are on (see syncBashObserver).
+func (s *lessonService) observeBashExit(tc adk.ToolContext, exitCode int, timedOut bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("lessons: bash exit observer recovered from a panic: %v", r)
+		}
+	}()
+	if tc == nil {
+		return
+	}
+	s.recordBashExit(callKey{realSessionID(tc), tc.InvocationID(), tc.FunctionCallID()}, bashExit{code: exitCode, timedOut: timedOut})
+}
+
+// takeStart returns and forgets a call's recorded start time, or fallback when
+// none was recorded, and the Bash exit status when the tool reported one.
+func (s *lessonService) takeStart(k callKey, fallback time.Time) (time.Time, *bashExit) {
+	s.startsMu.Lock()
+	defer s.startsMu.Unlock()
+	st, ok := s.starts[k]
+	if !ok {
+		return fallback, nil
 	}
 	delete(s.starts, k)
-	return t
+	return st.at, st.exit
 }
 
 // BeforeModel returns the before-model callback that puts an agent's prompt
@@ -319,7 +377,11 @@ func (s *lessonService) BeforeModel(agent string) llmagent.BeforeModelCallback {
 		if sid == "" {
 			sid = ctx.SessionID()
 		}
-		appendLessonBlock(req, s.storeFor(sid).PromptBlock(agent, s.now()))
+		root, ok := s.rootFor(sid)
+		if !ok {
+			return nil, nil
+		}
+		appendLessonBlock(req, lessons.In(root).PromptBlock(agent, s.now()))
 		return nil, nil
 	}
 }
@@ -366,10 +428,19 @@ func logLessonState(agent, id string, old, now lessons.State) {
 func (s *lessonService) afterTool(agent string, tc adk.ToolContext, name string, args, result map[string]any, err error) map[string]any {
 	now := s.now()
 	sid := realSessionID(tc)
-	started := s.takeStart(callKey{sid, tc.InvocationID(), tc.FunctionCallID()}, now)
-	root := s.rootFor(sid)
+	started, exit := s.takeStart(callKey{sid, tc.InvocationID(), tc.FunctionCallID()}, now)
+	errText, outcome := classifyToolCall(name, args, result, err, exit)
+	if outcome == callNeither {
+		// Refused before it ran: neither a mistake nor a proof that the
+		// arguments work. No episode, no outcome, no count.
+		return nil
+	}
+	root, ok := s.rootFor(sid)
+	if !ok {
+		return nil
+	}
+	failed := outcome == callFailed
 	store := lessons.In(root)
-	errText, failed := classifyToolFailure(result, err)
 	// Counters and episodes only from turns the user started: a hidden
 	// session or an unattended turn (mailbox, A2A, …) still gets the hint.
 	record := !sessionHidden(sid) && !memoryReadOnly(tc)
@@ -386,17 +457,17 @@ func (s *lessonService) afterTool(agent string, tc adk.ToolContext, name string,
 	if !failed {
 		return nil
 	}
-	l, ok := store.Find(agent, sig)
-	if ok && record {
+	l, found := store.Find(agent, sig)
+	if found && record {
 		// Count the occurrence first so the hint reflects the lesson's state now.
-		if seen, found, serr := store.RecordSeen(agent, sig, sid, s.now()); serr != nil {
+		if seen, ok, serr := store.RecordSeen(agent, sig, sid, s.now()); serr != nil {
 			log.Printf("lessons: count occurrence of %s for %s: %v", l.ID, agent, serr)
-		} else if found {
+		} else if ok {
 			logLessonState(agent, l.ID, l.State, seen.State)
 			l = seen
 		}
 	}
-	if !ok || l.State == lessons.StateRetired {
+	if !found || l.State == lessons.StateRetired {
 		return nil
 	}
 	if record {
@@ -409,9 +480,10 @@ func (s *lessonService) afterTool(agent string, tc adk.ToolContext, name string,
 }
 
 // settleOutcome decides a pending hint from the next call of its tool that
-// started after the hint was delivered: a success recovered, the same error
-// again repeated, another error neither. A sibling that started before the hint
-// leaves it pending — it ran without knowing the lesson.
+// ran and started after the hint was delivered: a success recovered, the same
+// error again repeated. Another error drops the hint without counting it. A
+// sibling that started before the hint leaves it pending — it ran without
+// knowing the lesson — and so does a refused call (it never reaches here).
 func (s *lessonService) settleOutcome(store *lessons.Store, k runKey, toolKey string, failed bool, sig string, started time.Time) {
 	pk := pendingHintKey{run: k, toolKey: toolKey}
 	s.mu.Lock()

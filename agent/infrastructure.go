@@ -295,6 +295,10 @@ func BuildInfrastructure(ctx context.Context, opts Options) (*Infrastructure, er
 		RouteDirectives: NewRouteRegistry(),
 		SpawnDirectives: NewSpawnRegistry(),
 	}
+	// The Bash tool reports each command's exit status to the lessons tracker
+	// (side channel; the model sees the same text). Installed while lessons are
+	// on; the Manager re-syncs it on every generation change.
+	infra.Lessons.syncBashObserver()
 	// Hooks report the session's permission mode on stdin.
 	hooks.SetPermissionModeResolver(func(sid string) string { return infra.PermissionModeFor(sid) })
 	return infra, nil

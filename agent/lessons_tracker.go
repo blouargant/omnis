@@ -17,7 +17,7 @@ const (
 // in the same run: the raw material of a lesson.
 type lessonEpisode struct {
 	Root, SessionID, Invocation, Agent, Tool, ToolKey, Signature string
-	FailedArgs, ErrText, WorkedArgs                              string // JSON, capped at 2000 chars each
+	FailedArgs, ErrText, WorkedArgs                              string // args JSON / error text, capped at 2000 chars each
 	Attempts                                                     int
 }
 
@@ -55,9 +55,16 @@ func capJSON(args map[string]any) string {
 	if err != nil {
 		return ""
 	}
-	s := string(b)
+	return capRunes(string(b))
+}
+
+// capRunes keeps the first lessonArgsCap runes of s.
+func capRunes(s string) string {
+	if len(s) <= lessonArgsCap {
+		return s
+	}
 	if r := []rune(s); len(r) > lessonArgsCap {
-		s = string(r[:lessonArgsCap])
+		return string(r[:lessonArgsCap])
 	}
 	return s
 }
@@ -82,6 +89,7 @@ func (t *lessonTracker) observe(k runKey, root, tool string, args map[string]any
 	t.evictLocked()
 	if failed {
 		sig = lessons.Signature(toolKey, errText)
+		errText = capRunes(errText)
 		of := rs.open[toolKey]
 		if of != nil && of.sig == sig {
 			of.attempts++

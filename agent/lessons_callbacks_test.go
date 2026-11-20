@@ -443,7 +443,7 @@ func TestStartTimesAreBounded(t *testing.T) {
 	}
 	// A call never recorded falls back to the given time.
 	fb := time.Unix(42, 0)
-	if got := s.takeStart(callKey{"x", "y", "z"}, fb); !got.Equal(fb) {
+	if got, exit := s.takeStart(callKey{"x", "y", "z"}, fb); !got.Equal(fb) || exit != nil {
 		t.Fatalf("fallback = %v", got)
 	}
 	// BeforeTool never short-circuits.

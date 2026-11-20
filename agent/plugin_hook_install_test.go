@@ -73,3 +73,27 @@ func TestSuccessfulReloadAppliesPluginHookLayers(t *testing.T) {
 		t.Fatalf("the installed generation disabled the plugin, yet %d Bash commands remain", n)
 	}
 }
+
+// A reload that turns lessons off, then on again, flips the switch the lesson
+// callbacks read (one atomic load) and the Bash exit observer with it.
+func TestReloadFlipsTheLessonsSwitchBothWays(t *testing.T) {
+	m, infra, sys := bootPluginManager(t)
+	t.Setenv("OMNIS_LESSONS", "")
+	if !infra.Lessons.isEnabled() {
+		t.Fatal("lessons should be on after boot")
+	}
+	writeFile(t, filepath.Join(sys, "agents.json"), `{"agents": ["leader"], "router_squad": "none", "lessons": {"enabled": false}}`)
+	if _, err := m.Reload(context.Background(), Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if infra.Lessons.isEnabled() {
+		t.Fatal("a reload that turns lessons off left them on")
+	}
+	writeFile(t, filepath.Join(sys, "agents.json"), `{"agents": ["leader"], "router_squad": "none", "lessons": {"enabled": true}}`)
+	if _, err := m.Reload(context.Background(), Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if !infra.Lessons.isEnabled() {
+		t.Fatal("a reload that turns lessons on left them off")
+	}
+}

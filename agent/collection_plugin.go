@@ -100,6 +100,19 @@ func collectionRoot(sessionID string) string {
 	return rootFn(sessionID)
 }
 
+// collectionRootResolved is collectionRoot plus whether a root resolver is
+// installed, so a caller can tell "no per-user roots" (shared root) from "the
+// resolver could not name this session's owner".
+func collectionRootResolved(sessionID string) (root string, installed bool) {
+	collectionRootMu.RLock()
+	rootFn := collectionRootResolver
+	collectionRootMu.RUnlock()
+	if rootFn == nil {
+		return "", false
+	}
+	return rootFn(sessionID), true
+}
+
 // resolveCollectionBlock renders a collection's instructions block from the
 // session's state root (per-user when a root resolver is installed, else shared).
 func resolveCollectionBlock(sessionID, name string) string {
