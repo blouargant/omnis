@@ -1119,5 +1119,15 @@
   "set.perm.sessionHint": "Chaque conversation peut remplacer ce mode (pastille au-dessus du composeur, Maj+Tab ou /mode).",
   "picker.permissions": "Permissions",
   "picker.permissionsAria": "Mode de permission de la nouvelle conversation",
-  "set.agent.configWarnings": "Problèmes de configuration (ignorés pour que le serveur puisse démarrer) :"
+  "set.agent.configWarnings": "Problèmes de configuration (ignorés pour que le serveur puisse démarrer) :",
+  "set.agent.lessons.title": "Leçons",
+  "set.agent.lessons.intro": "Leçons d'une ligne tirées par cet agent de ses propres erreurs d'outil. Elles s'appliquent automatiquement.",
+  "set.agent.lessons.hint": "Indice",
+  "set.agent.lessons.prompt": "Dans le prompt",
+  "set.agent.lessons.retired": "Retirée",
+  "set.agent.lessons.delete": "Supprimer",
+  "set.agent.lessons.deleteConfirm": "Supprimer cette leçon ? L'agent ne l'appliquera plus.",
+  "set.agent.lessons.toggle": "Apprendre des erreurs",
+  "set.agent.lessons.toggleTip": "Activé par défaut. L'agent retient ce qui a corrigé une erreur d'outil et le réutilise. Désactivez pour arrêter d'apprendre et d'appliquer des leçons.",
+  "set.agent.lessons.counters": "Vue {seen}, indice {hinted}, résolue {recovered}, répétée {repeated}"
 }

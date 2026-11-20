@@ -1119,5 +1119,15 @@
   "set.perm.sessionHint": "Cada chat puede reemplazar este modo (indicador sobre el compositor, Mayús+Tab o /mode).",
   "picker.permissions": "Permisos",
   "picker.permissionsAria": "Modo de permisos del nuevo chat",
-  "set.agent.configWarnings": "Problemas de configuración (ignorados para que el servidor pueda arrancar):"
+  "set.agent.configWarnings": "Problemas de configuración (ignorados para que el servidor pueda arrancar):",
+  "set.agent.lessons.title": "Lecciones",
+  "set.agent.lessons.intro": "Lecciones de una línea que este agente aprendió de sus propios errores de herramienta. Se aplican automáticamente.",
+  "set.agent.lessons.hint": "Pista",
+  "set.agent.lessons.prompt": "En el prompt",
+  "set.agent.lessons.retired": "Retirada",
+  "set.agent.lessons.delete": "Eliminar",
+  "set.agent.lessons.deleteConfirm": "¿Eliminar esta lección? El agente dejará de aplicarla.",
+  "set.agent.lessons.toggle": "Aprender de los errores",
+  "set.agent.lessons.toggleTip": "Activado por defecto. El agente recuerda lo que corrigió un error de herramienta y lo reutiliza. Desactívalo para dejar de aprender y aplicar lecciones.",
+  "set.agent.lessons.counters": "Vista {seen}, pista {hinted}, resuelta {recovered}, repetida {repeated}"
 }

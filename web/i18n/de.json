@@ -1119,5 +1119,15 @@
   "set.perm.sessionHint": "Jeder Chat kann diesen Modus überschreiben (Anzeige über dem Eingabefeld, Umschalt+Tab oder /mode).",
   "picker.permissions": "Berechtigungen",
   "picker.permissionsAria": "Berechtigungsmodus für den neuen Chat",
-  "set.agent.configWarnings": "Konfigurationsprobleme (ignoriert, damit der Server starten kann):"
+  "set.agent.configWarnings": "Konfigurationsprobleme (ignoriert, damit der Server starten kann):",
+  "set.agent.lessons.title": "Lektionen",
+  "set.agent.lessons.intro": "Einzeilige Lektionen, die dieser Agent aus seinen eigenen Tool-Fehlern gelernt hat. Sie werden automatisch angewendet.",
+  "set.agent.lessons.hint": "Hinweis",
+  "set.agent.lessons.prompt": "Im Prompt",
+  "set.agent.lessons.retired": "Zurückgezogen",
+  "set.agent.lessons.delete": "Löschen",
+  "set.agent.lessons.deleteConfirm": "Diese Lektion löschen? Der Agent wendet sie nicht mehr an.",
+  "set.agent.lessons.toggle": "Aus Fehlern lernen",
+  "set.agent.lessons.toggleTip": "Standardmäßig aktiviert. Der Agent merkt sich, was einen Tool-Fehler behoben hat, und nutzt es erneut. Deaktivieren, um das Lernen und Anwenden von Lektionen zu beenden.",
+  "set.agent.lessons.counters": "Gesehen {seen}, Hinweis {hinted}, behoben {recovered}, wiederholt {repeated}"
 }

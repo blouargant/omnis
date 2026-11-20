@@ -798,6 +798,8 @@ func newEngine(d serverDeps) *gin.Engine {
 	auth.DELETE("/collections/:name", handleDeleteCollection(d))
 	auth.GET("/collections/:name/context", handleGetCollectionContext(d))
 	auth.PUT("/collections/:name/context", handleSetCollectionContext(d))
+	auth.GET("/agents/:name/lessons", handleListLessons(d))
+	auth.DELETE("/agents/:name/lessons/:id", handleDeleteLesson(d))
 	auth.GET("/collections/:name/memories", handleListMemories(d))
 	auth.PUT("/collections/:name/memories/:mem", handlePutMemory(d))
 	auth.DELETE("/collections/:name/memories/:mem", handleDeleteMemory(d))
