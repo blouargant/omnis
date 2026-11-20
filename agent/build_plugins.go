@@ -73,6 +73,16 @@ func buildPlugins(
 		return nil
 	}
 
+	// The lessons start-time recorder goes FIRST, ahead of the hooks,
+	// permission and budget plugins (as on sub-agents, where it rides in the
+	// events slot): a call that waits on a card or a validation hook must be
+	// stamped when it started, or it could close a sibling's failure it never
+	// benefited from. It always returns nil, nil, so it never short-circuits.
+	if !isRouterSquad && lessonsActive(runtime, rootCfg) {
+		if rp, rerr := lessonStartPlugin("lessons_start", infra.Lessons.BeforeTool(rootCfg.Name)); rerr == nil && rp != nil {
+			plugins = append(plugins, rp)
+		}
+	}
 	if eventsPlugin, err := bus.PluginWithOptions("events", events.PluginOptions{IncludeModelRequest: opts.DebugLogging}); err == nil {
 		plugins = append(plugins, eventsPlugin)
 	}
@@ -128,13 +138,11 @@ func buildPlugins(
 	// Lesson hints ride inside this plugin, after the shaper (see
 	// codingEfficiencyPlugin), so they are never cut.
 	if !isRouterSquad {
-		var lessonBefore llmagent.BeforeToolCallback
 		var lessonAfter llmagent.AfterToolCallback
 		if lessonsActive(runtime, rootCfg) {
-			lessonBefore = infra.Lessons.BeforeTool(rootCfg.Name)
 			lessonAfter = infra.Lessons.AfterTool(rootCfg.Name)
 		}
-		if cep, cepClean, cerr := codingEfficiencyPlugin("coding_efficiency", lspMgr, bus, lessonBefore, lessonAfter); cerr == nil && cep != nil {
+		if cep, cepClean, cerr := codingEfficiencyPlugin("coding_efficiency", lspMgr, bus, lessonAfter); cerr == nil && cep != nil {
 			plugins = append(plugins, cep)
 			if cepClean != nil {
 				extraCleanups = append(extraCleanups, cepClean)

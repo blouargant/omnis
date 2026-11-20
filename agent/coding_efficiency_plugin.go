@@ -137,9 +137,7 @@ func newCodingEfficiency(lspMgr *lsp.Manager) *codingEfficiency {
 // then, when non-nil, runs on the (possibly shaped) result: ADK's plugin
 // manager stops at the first plugin that returns a result, so a separate plugin
 // would never see a shaped one.
-// before, when non-nil, is the plugin's before-tool callback (the lessons
-// start-time recorder; it never short-circuits).
-func codingEfficiencyPlugin(name string, lspMgr *lsp.Manager, bus *events.Bus, before llmagent.BeforeToolCallback, then llmagent.AfterToolCallback) (*plugin.Plugin, func(), error) {
+func codingEfficiencyPlugin(name string, lspMgr *lsp.Manager, bus *events.Bus, then llmagent.AfterToolCallback) (*plugin.Plugin, func(), error) {
 	ce := newCodingEfficiency(lspMgr)
 	cleanup := func() {}
 	if bus != nil {
@@ -151,9 +149,8 @@ func codingEfficiencyPlugin(name string, lspMgr *lsp.Manager, bus *events.Bus, b
 		cleanup = func() { sub.Off() }
 	}
 	p, err := plugin.New(plugin.Config{
-		Name:               name,
-		BeforeToolCallback: before,
-		AfterToolCallback:  chainAfterTool(llmagent.AfterToolCallback(ce.afterTool), then),
+		Name:              name,
+		AfterToolCallback: chainAfterTool(llmagent.AfterToolCallback(ce.afterTool), then),
 	})
 	if err != nil {
 		cleanup()

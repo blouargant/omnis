@@ -176,7 +176,7 @@ func TestRouterHasNoLessonCallback(t *testing.T) {
 	// The hint only ever rides inside the coding-efficiency plugin (and the
 	// prompt block in the lessons plugin): neither may be on the router.
 	for _, p := range sq.Plugins {
-		if p.Name() == "coding_efficiency" || p.Name() == "lessons" {
+		if p.Name() == "coding_efficiency" || p.Name() == "lessons" || p.Name() == "lessons_start" {
 			t.Fatalf("router mounts the %q plugin", p.Name())
 		}
 	}
@@ -187,8 +187,8 @@ func TestRouterHasNoLessonCallback(t *testing.T) {
 }
 
 // The start-time recorder is the events slot's companion on a sub-agent (the
-// first before-tool callback) and the coding-efficiency plugin's before-tool on
-// a non-router root; with lessons off, neither records.
+// first before-tool callback) and the FIRST plugin on a non-router root, ahead
+// of the hooks, permission and budget plugins; with lessons off, neither records.
 func TestBeforeToolRecorderIsMounted(t *testing.T) {
 	for _, tc := range []struct {
 		name, extra string
@@ -214,9 +214,15 @@ func TestBeforeToolRecorderIsMounted(t *testing.T) {
 			}
 
 			var rootBefore llmagent.BeforeToolCallback
-			for _, p := range sq.Plugins {
-				if p.Name() == "coding_efficiency" {
+			for i, p := range sq.Plugins {
+				if p.Name() == "lessons_start" {
+					if i != 0 {
+						t.Fatalf("lessons_start is plugin %d, want the first", i)
+					}
 					rootBefore = p.BeforeToolCallback()
+				}
+				if p.Name() == "coding_efficiency" && p.BeforeToolCallback() != nil {
+					t.Fatal("the coding-efficiency plugin still carries a before-tool callback")
 				}
 			}
 			if (rootBefore != nil) != tc.want {

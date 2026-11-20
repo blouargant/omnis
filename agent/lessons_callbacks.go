@@ -418,6 +418,15 @@ func lessonsPlugin(name string, cb llmagent.BeforeModelCallback) (*plugin.Plugin
 	return plugin.New(plugin.Config{Name: name, BeforeModelCallback: cb})
 }
 
+// lessonStartPlugin is the runner plugin carrying the start-time recorder on a
+// squad root. Mounted first so the stamp precedes hooks, permissions and budget.
+func lessonStartPlugin(name string, cb llmagent.BeforeToolCallback) (*plugin.Plugin, error) {
+	if cb == nil {
+		return nil, nil
+	}
+	return plugin.New(plugin.Config{Name: name, BeforeToolCallback: cb})
+}
+
 // logLessonState logs one line when a lesson changed state. Never its content.
 func logLessonState(agent, id string, old, now lessons.State) {
 	if old != now {
