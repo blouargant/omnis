@@ -84,3 +84,23 @@ func TestSignatureNormalisesEveryPathShape(t *testing.T) {
 		}
 	}
 }
+
+// A bare dotted name is a file name only with a known extension: dotted
+// identifiers keep their errors apart.
+func TestSignatureKeepsDottedIdentifiers(t *testing.T) {
+	differ := [][2]string{
+		{"undefined: strings.Builder", "undefined: http.Client"},
+		{`deployments.apps "x" not found`, `statefulsets.apps "x" not found`},
+	}
+	for _, p := range differ {
+		if Signature("T", p[0]) == Signature("T", p[1]) {
+			t.Errorf("expected different: %q vs %q (%q / %q)", p[0], p[1], normalise(p[0]), normalise(p[1]))
+		}
+	}
+	base := Signature("Edit", "old_string not found in prices.go")
+	for _, other := range []string{"old_string not found in server/main.go", "old_string not found in notes.md"} {
+		if Signature("Edit", other) != base {
+			t.Errorf("expected equal to prices.go: %q (%q)", other, normalise(other))
+		}
+	}
+}
