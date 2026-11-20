@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -138,9 +139,14 @@ func TestHandleExistingLessonCallsNoModel(t *testing.T) {
 	defer s.Close()
 	ep := writerEp(t.TempDir(), sigN(1))
 	s.handle(context.Background(), ep)
+	before, _ := lessons.In(ep.Root).Find("coder", ep.Signature)
 	s.handle(context.Background(), ep)
 	if f.calls.Load() != 1 {
 		t.Fatalf("calls = %d", f.calls.Load())
+	}
+	after, _ := lessons.In(ep.Root).Find("coder", ep.Signature)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("stored lesson changed:\n%+v\n%+v", before, after)
 	}
 }
 

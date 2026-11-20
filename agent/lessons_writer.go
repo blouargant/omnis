@@ -86,10 +86,9 @@ func (s *lessonService) handle(ctx context.Context, ep lessonEpisode) {
 	}
 	now := s.now()
 	store := lessons.In(ep.Root)
+	// An existing lesson needs no model call and no write: the after-tool
+	// callback is the single owner of its counters.
 	if _, ok := store.Find(ep.Agent, ep.Signature); ok {
-		if _, _, err := store.RecordSeen(ep.Agent, ep.Signature, ep.SessionID, now); err != nil {
-			log.Printf("lessons: count %s for %s: %v", ep.Signature[:12], ep.Agent, err)
-		}
 		return
 	}
 	if s.noneRemembered(noneKey{ep.Agent, ep.Signature}, now) {
