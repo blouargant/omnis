@@ -18,6 +18,13 @@ import (
 // buildLessonFleet builds a real generation: a "default" squad led by leader
 // with one member "worker". routerSquad is written into agents.json as is.
 func buildLessonFleet(t *testing.T, routerSquad string) (*Instance, string) {
+	inst, home, _ := buildLessonFleetWith(t, routerSquad, "")
+	return inst, home
+}
+
+// buildLessonFleetWith also takes extra top-level agents.json keys (",..."
+// appended) and returns the infrastructure.
+func buildLessonFleetWith(t *testing.T, routerSquad, extra string) (*Instance, string, *Infrastructure) {
 	t.Helper()
 	layer := t.TempDir()
 	home := t.TempDir()
@@ -31,7 +38,7 @@ func buildLessonFleet(t *testing.T, routerSquad string) (*Instance, string) {
 
 	writeAgentDef(t, layer, "leader", `{"name":"leader","enabled":true,"leader":true,"description":"Coordinator.","tools":[]}`)
 	writeAgentDef(t, layer, "worker", `{"name":"worker","enabled":true,"description":"Does the work.","tools":[]}`)
-	agentsJSON := `{"agents":["leader","worker"],"router_squad":` + routerSquad + `,
+	agentsJSON := `{"agents":["leader","worker"],"router_squad":` + routerSquad + extra + `,
 		"squads":[{"name":"default","leader":"leader","members":["worker"]}]}`
 	if err := os.WriteFile(filepath.Join(layer, "agents.json"), []byte(agentsJSON), 0o644); err != nil {
 		t.Fatal(err)
@@ -47,29 +54,52 @@ func buildLessonFleet(t *testing.T, routerSquad string) (*Instance, string) {
 	if err != nil {
 		t.Fatalf("build instance: %v", err)
 	}
-	return inst, home
+	return inst, home, infra
 }
 
-// subAgentAfterTools reads a built agent's after-tool callbacks. ADK keeps them
-// in an unexported field; the assertion that matters is that the BUILT agent
-// carries the lesson callback after the shaper, so read them there.
-func subAgentAfterTools(t *testing.T, a adkagent.Agent) []llmagent.AfterToolCallback {
+// unexportedField reads an unexported field of a built ADK agent. ADK keeps
+// the callbacks there; the assertion that matters is on the BUILT agent.
+func unexportedField(t *testing.T, a adkagent.Agent, name string) reflect.Value {
 	t.Helper()
 	v := reflect.ValueOf(a)
 	for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
 		v = v.Elem()
 	}
-	f := v.FieldByName("afterToolCallbacks")
+	f := v.FieldByName(name)
 	if !f.IsValid() {
-		t.Fatalf("built agent has no afterToolCallbacks field (ADK layout changed?): %T", a)
+		t.Fatalf("built agent has no %s field (ADK layout changed?): %T", name, a)
 	}
-	f = reflect.NewAt(f.Type(), unsafe.Pointer(f.UnsafeAddr())).Elem()
+	return reflect.NewAt(f.Type(), unsafe.Pointer(f.UnsafeAddr())).Elem()
+}
+
+func subAgentAfterTools(t *testing.T, a adkagent.Agent) []llmagent.AfterToolCallback {
+	t.Helper()
+	f := unexportedField(t, a, "afterToolCallbacks")
 	cbType := reflect.TypeOf(llmagent.AfterToolCallback(nil))
 	out := make([]llmagent.AfterToolCallback, 0, f.Len())
 	for i := 0; i < f.Len(); i++ {
 		out = append(out, f.Index(i).Convert(cbType).Interface().(llmagent.AfterToolCallback))
 	}
 	return out
+}
+
+func subAgentBeforeTools(t *testing.T, a adkagent.Agent) []llmagent.BeforeToolCallback {
+	t.Helper()
+	f := unexportedField(t, a, "beforeToolCallbacks")
+	cbType := reflect.TypeOf(llmagent.BeforeToolCallback(nil))
+	out := make([]llmagent.BeforeToolCallback, 0, f.Len())
+	for i := 0; i < f.Len(); i++ {
+		out = append(out, f.Index(i).Convert(cbType).Interface().(llmagent.BeforeToolCallback))
+	}
+	return out
+}
+
+// startRecorded reports whether the lessons start-time recorder saw the call.
+func startRecorded(s *lessonService, c lessonCtx) bool {
+	s.startsMu.Lock()
+	defer s.startsMu.Unlock()
+	_, ok := s.starts[callKey{c.sid, c.inv, c.call}]
+	return ok
 }
 
 func hugeKnownError(t *testing.T, root, agent string) (map[string]any, map[string]any) {
@@ -153,5 +183,54 @@ func TestRouterHasNoLessonCallback(t *testing.T) {
 	// And the answering squad of the same generation does carry it.
 	if codingPluginAfterTool(inst.Squad("default")) == nil {
 		t.Fatal("the answering root lost its coding_efficiency plugin")
+	}
+}
+
+// The start-time recorder is the events slot's companion on a sub-agent (the
+// first before-tool callback) and the coding-efficiency plugin's before-tool on
+// a non-router root; with lessons off, neither records.
+func TestBeforeToolRecorderIsMounted(t *testing.T) {
+	for _, tc := range []struct {
+		name, extra string
+		want        bool
+	}{
+		{"on", "", true},
+		{"off", `,"lessons":{"enabled":false}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inst, _, infra := buildLessonFleetWith(t, `"none"`, tc.extra)
+			sq := inst.Squad("default")
+
+			sub := newLessonCtx("s1", "inv1").withCall("sub-call")
+			befores := subAgentBeforeTools(t, sq.SubAgents["worker"])
+			if len(befores) == 0 {
+				t.Fatal("sub-agent has no before-tool callback")
+			}
+			if out, err := befores[0](sub, namedTool{name: "Bash"}, lessonTestArgs); out != nil || err != nil {
+				t.Fatalf("the events slot short-circuited: %v %v", out, err)
+			}
+			if got := startRecorded(infra.Lessons, sub); got != tc.want {
+				t.Fatalf("sub-agent start recorded = %v, want %v", got, tc.want)
+			}
+
+			var rootBefore llmagent.BeforeToolCallback
+			for _, p := range sq.Plugins {
+				if p.Name() == "coding_efficiency" {
+					rootBefore = p.BeforeToolCallback()
+				}
+			}
+			if (rootBefore != nil) != tc.want {
+				t.Fatalf("root before-tool mounted = %v, want %v", rootBefore != nil, tc.want)
+			}
+			if rootBefore != nil {
+				root := newLessonCtx("s1", "inv1").withCall("root-call")
+				if out, err := rootBefore(root, namedTool{name: "Bash"}, lessonTestArgs); out != nil || err != nil {
+					t.Fatalf("root recorder short-circuited: %v %v", out, err)
+				}
+				if !startRecorded(infra.Lessons, root) {
+					t.Fatal("root start not recorded")
+				}
+			}
+		})
 	}
 }

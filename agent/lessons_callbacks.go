@@ -26,6 +26,10 @@ const (
 	lessonHintKey = "lesson"
 	// lessonPendingMax bounds the hints waiting for their outcome.
 	lessonPendingMax = 1024
+	// lessonStartsMax and lessonStartTTL bound the recorded call start times: a
+	// call whose after-tool callback never runs must not leak.
+	lessonStartsMax = 4096
+	lessonStartTTL  = 30 * time.Minute
 )
 
 // lessonService is the process-wide agent-lessons machinery: it adds a known
@@ -47,7 +51,14 @@ type lessonService struct {
 	mu      sync.Mutex
 	pending map[pendingHintKey]pendingHint
 	seq     uint64
+
+	startsMu sync.Mutex
+	starts   map[callKey]time.Time
 }
+
+// callKey identifies one tool call: its start time is recorded by BeforeTool
+// and taken by AfterTool.
+type callKey struct{ session, invocation, call string }
 
 type pendingHintKey struct {
 	run     runKey
@@ -59,6 +70,7 @@ type pendingHintKey struct {
 type pendingHint struct {
 	id, sig string
 	seq     uint64
+	at      time.Time // when the hint was delivered
 }
 
 // newLessonService builds the service. enabled reports the fleet-wide switch
@@ -70,6 +82,7 @@ func newLessonService(enabled func() bool) *lessonService {
 		now:       time.Now,
 		enabledFn: enabled,
 		pending:   map[pendingHintKey]pendingHint{},
+		starts:    map[callKey]time.Time{},
 	}
 	s.tracker = newLessonTracker(s.enqueue)
 	return s
@@ -182,6 +195,66 @@ func (s *lessonService) AfterTool(agent string) llmagent.AfterToolCallback {
 	}
 }
 
+// BeforeTool returns the before-tool callback that records when a call
+// started, so a parallel sibling that started before a failure completed is
+// never read as the success that followed it. It always returns nil, nil: it
+// never short-circuits a tool. nil receiver ⇒ nil callback.
+func (s *lessonService) BeforeTool(agent string) llmagent.BeforeToolCallback {
+	if s == nil || agent == "" {
+		return nil
+	}
+	return func(tc adk.ToolContext, _ tool.Tool, _ map[string]any) (map[string]any, error) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("lessons: before-tool callback of %s recovered from a panic: %v", agent, r)
+			}
+		}()
+		if tc == nil || !s.isEnabled() {
+			return nil, nil
+		}
+		s.recordStart(callKey{realSessionID(tc), tc.InvocationID(), tc.FunctionCallID()}, s.now())
+		return nil, nil
+	}
+}
+
+func (s *lessonService) recordStart(k callKey, at time.Time) {
+	s.startsMu.Lock()
+	defer s.startsMu.Unlock()
+	s.starts[k] = at
+	if len(s.starts) <= lessonStartsMax {
+		return
+	}
+	for key, t := range s.starts {
+		if at.Sub(t) > lessonStartTTL {
+			delete(s.starts, key)
+		}
+	}
+	for len(s.starts) > lessonStartsMax {
+		var oldest callKey
+		var min time.Time
+		first := true
+		for key, t := range s.starts {
+			if first || t.Before(min) {
+				oldest, min, first = key, t, false
+			}
+		}
+		delete(s.starts, oldest)
+	}
+}
+
+// takeStart returns and forgets a call's recorded start time, or fallback when
+// none was recorded (a callback earlier in the chain short-circuited the call).
+func (s *lessonService) takeStart(k callKey, fallback time.Time) time.Time {
+	s.startsMu.Lock()
+	defer s.startsMu.Unlock()
+	t, ok := s.starts[k]
+	if !ok {
+		return fallback
+	}
+	delete(s.starts, k)
+	return t
+}
+
 // BeforeModel returns the before-model callback that puts an agent's prompt
 // lessons in its system instruction. Inert for now.
 func (s *lessonService) BeforeModel(agent string) llmagent.BeforeModelCallback {
@@ -191,6 +264,7 @@ func (s *lessonService) BeforeModel(agent string) llmagent.BeforeModelCallback {
 func (s *lessonService) afterTool(agent string, tc adk.ToolContext, name string, args, result map[string]any, err error) map[string]any {
 	now := s.now()
 	sid := realSessionID(tc)
+	started := s.takeStart(callKey{sid, tc.InvocationID(), tc.FunctionCallID()}, now)
 	root := s.rootFor(sid)
 	store := lessons.In(root)
 	errText, failed := classifyToolFailure(result, err)
@@ -204,8 +278,8 @@ func (s *lessonService) afterTool(agent string, tc adk.ToolContext, name string,
 		sig = lessons.Signature(toolKey, errText)
 	}
 	if record {
-		s.settleOutcome(store, k, toolKey, failed, sig)
-		s.tracker.observe(k, root, name, args, errText, failed, now)
+		s.settleOutcome(store, k, toolKey, failed, sig, started)
+		s.tracker.observe(k, root, name, args, errText, failed, started)
 	}
 	if !failed {
 		return nil
@@ -218,18 +292,22 @@ func (s *lessonService) afterTool(agent string, tc adk.ToolContext, name string,
 		if herr := store.RecordHint(agent, l.ID); herr != nil {
 			log.Printf("lessons: count hint %s of %s: %v", l.ID, agent, herr)
 		}
-		s.setPending(k, toolKey, l.ID, sig)
+		s.setPending(k, toolKey, l.ID, sig, s.now())
 	}
 	return withLessonHint(result, err, l)
 }
 
-// settleOutcome decides a pending hint from the next call of its tool: a
-// success recovered, the same error again repeated, another error neither.
-func (s *lessonService) settleOutcome(store *lessons.Store, k runKey, toolKey string, failed bool, sig string) {
+// settleOutcome decides a pending hint from the next call of its tool that
+// started after the hint was delivered: a success recovered, the same error
+// again repeated, another error neither. A sibling that started before the hint
+// leaves it pending — it ran without knowing the lesson.
+func (s *lessonService) settleOutcome(store *lessons.Store, k runKey, toolKey string, failed bool, sig string, started time.Time) {
 	pk := pendingHintKey{run: k, toolKey: toolKey}
 	s.mu.Lock()
 	p, ok := s.pending[pk]
-	if ok {
+	if ok && started.Before(p.at) {
+		ok = false
+	} else if ok {
 		delete(s.pending, pk)
 	}
 	s.mu.Unlock()
@@ -241,11 +319,11 @@ func (s *lessonService) settleOutcome(store *lessons.Store, k runKey, toolKey st
 	}
 }
 
-func (s *lessonService) setPending(k runKey, toolKey, id, sig string) {
+func (s *lessonService) setPending(k runKey, toolKey, id, sig string, at time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.seq++
-	s.pending[pendingHintKey{run: k, toolKey: toolKey}] = pendingHint{id: id, sig: sig, seq: s.seq}
+	s.pending[pendingHintKey{run: k, toolKey: toolKey}] = pendingHint{id: id, sig: sig, seq: s.seq, at: at}
 	for len(s.pending) > lessonPendingMax {
 		var oldest pendingHintKey
 		var min uint64

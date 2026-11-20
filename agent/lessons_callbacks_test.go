@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -16,8 +17,8 @@ import (
 // real context.Context (memoryReadOnly and the steer session read from it).
 type lessonCtx struct {
 	adk.ToolContext
-	ctx      context.Context
-	sid, inv string
+	ctx            context.Context
+	sid, inv, call string
 }
 
 func (c lessonCtx) Deadline() (time.Time, bool) { return c.ctx.Deadline() }
@@ -26,6 +27,12 @@ func (c lessonCtx) Err() error                  { return c.ctx.Err() }
 func (c lessonCtx) Value(k any) any             { return c.ctx.Value(k) }
 func (c lessonCtx) SessionID() string           { return c.sid }
 func (c lessonCtx) InvocationID() string        { return c.inv }
+func (c lessonCtx) FunctionCallID() string      { return c.call }
+func (c lessonCtx) AgentName() string           { return "" }
+func (c lessonCtx) UserID() string              { return "" }
+
+// withCall returns the context of one function call of the same run.
+func (c lessonCtx) withCall(id string) lessonCtx { c.call = id; return c }
 
 func newLessonCtx(sid, inv string) lessonCtx {
 	return lessonCtx{ctx: context.Background(), sid: sid, inv: inv}
@@ -358,5 +365,90 @@ func TestAgentLessonsFlagIsOptOut(t *testing.T) {
 		if !ok || cfg.Lessons != want {
 			t.Fatalf("%s: Lessons = %v (found %v), want %v", name, cfg.Lessons, ok, want)
 		}
+	}
+}
+
+// A success that STARTED before a sibling's failure completed ran without
+// knowing the error: it must not close the episode. A call that starts after
+// the failure completed does.
+func TestParallelSiblingSuccessDoesNotQueueAnEpisode(t *testing.T) {
+	lessonEnv(t)
+	s := newLessonService(nil)
+	before, after := s.BeforeTool("coder"), s.AfterTool("coder")
+	bash := namedTool{name: "Bash"}
+	run := newLessonCtx("s1", "inv1")
+	okArgs := map[string]any{"command": "kubectl get pods -A"}
+
+	slow, fast := run.withCall("ok-slow"), run.withCall("fail-fast")
+	before(slow, bash, okArgs)
+	before(fast, bash, lessonTestArgs)
+	time.Sleep(time.Millisecond)
+	after(fast, bash, lessonTestArgs, failResult(), nil)
+	after(slow, bash, okArgs, okResult(), nil)
+	if len(s.queue) != 0 {
+		t.Fatalf("a parallel sibling closed the episode: %+v", <-s.queue)
+	}
+
+	later := run.withCall("ok-later")
+	before(later, bash, okArgs)
+	after(later, bash, okArgs, okResult(), nil)
+	if len(s.queue) != 1 {
+		t.Fatalf("want one episode from the later success, got %d", len(s.queue))
+	}
+}
+
+// A sibling that started before the hint was delivered does not settle it.
+func TestSiblingStartedBeforeHintDoesNotSettleIt(t *testing.T) {
+	home := lessonEnv(t)
+	seedLesson(t, home, "coder", lessons.StateHint)
+	s := newLessonService(nil)
+	before, after := s.BeforeTool("coder"), s.AfterTool("coder")
+	bash := namedTool{name: "Bash"}
+	run := newLessonCtx("s1", "inv1")
+	okArgs := map[string]any{"command": "kubectl get pods -A"}
+
+	sib, fail := run.withCall("sib"), run.withCall("fail")
+	before(sib, bash, okArgs)
+	before(fail, bash, lessonTestArgs)
+	time.Sleep(time.Millisecond)
+	after(fail, bash, lessonTestArgs, failResult(), nil) // hint delivered
+	after(sib, bash, okArgs, okResult(), nil)
+	if l := findLesson(t, home, "coder"); l.Recovered != 0 || l.Repeated != 0 {
+		t.Fatalf("the sibling settled the hint: %+v", l)
+	}
+	next := run.withCall("next")
+	before(next, bash, okArgs)
+	after(next, bash, okArgs, okResult(), nil)
+	if l := findLesson(t, home, "coder"); l.Recovered != 1 {
+		t.Fatalf("the next call did not settle the hint: Recovered %d", l.Recovered)
+	}
+}
+
+func TestStartTimesAreBounded(t *testing.T) {
+	s := newLessonService(nil)
+	base := time.Now()
+	for i := 0; i < lessonStartsMax+10; i++ {
+		s.recordStart(callKey{"s", "inv", strconv.Itoa(i)}, base.Add(time.Duration(i)*time.Millisecond))
+	}
+	if n := len(s.starts); n > lessonStartsMax {
+		t.Fatalf("%d start times kept, cap %d", n, lessonStartsMax)
+	}
+	if _, kept := s.starts[callKey{"s", "inv", "0"}]; kept {
+		t.Fatal("the oldest start time was kept over the cap")
+	}
+	// Entries older than the TTL go first.
+	s.recordStart(callKey{"s", "inv", "late"}, base.Add(lessonStartTTL+time.Hour))
+	if n := len(s.starts); n != 1 {
+		t.Fatalf("stale start times not dropped: %d left", n)
+	}
+	// A call never recorded falls back to the given time.
+	fb := time.Unix(42, 0)
+	if got := s.takeStart(callKey{"x", "y", "z"}, fb); !got.Equal(fb) {
+		t.Fatalf("fallback = %v", got)
+	}
+	// BeforeTool never short-circuits.
+	out, err := s.BeforeTool("coder")(newLessonCtx("s", "inv").withCall("c"), namedTool{name: "Bash"}, nil)
+	if out != nil || err != nil {
+		t.Fatalf("BeforeTool returned %v %v", out, err)
 	}
 }

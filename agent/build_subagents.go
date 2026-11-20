@@ -232,7 +232,14 @@ func buildSubAgentsFromConfigs(
 			beforeModel = append(beforeModel, capHooks.FinalRound)
 		}
 		budgetBeforeTool := chainBeforeTool(capHooks.Before, budgetBeforeTool)
-		beforeTool := beforeToolChain(callbacks.BeforeTool, hooksBeforeTool, permGate, budgetBeforeTool)
+		// The lessons start-time recorder rides in the events slot (it never
+		// short-circuits), so the policy order events → hooks → permissions →
+		// budget is unchanged.
+		var lessonBefore llmagent.BeforeToolCallback
+		if lessonsActive(runtime, cfg) {
+			lessonBefore = lessonSvc.BeforeTool(cfg.Name)
+		}
+		beforeTool := beforeToolChain(chainBeforeTool(callbacks.BeforeTool, lessonBefore), hooksBeforeTool, permGate, budgetBeforeTool)
 		afterTool := []llmagent.AfterToolCallback{callbacks.AfterTool}
 		if hooksAfterTool != nil {
 			afterTool = append(afterTool, hooksAfterTool)

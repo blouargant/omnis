@@ -128,8 +128,10 @@ func buildPlugins(
 	// Lesson hints ride inside this plugin, after the shaper (see
 	// codingEfficiencyPlugin), so they are never cut.
 	if !isRouterSquad {
+		var lessonBefore llmagent.BeforeToolCallback
 		var lessonAfter llmagent.AfterToolCallback
 		if lessonsActive(runtime, rootCfg) {
+			lessonBefore = infra.Lessons.BeforeTool(rootCfg.Name)
 			lessonAfter = infra.Lessons.AfterTool(rootCfg.Name)
 			if lb := infra.Lessons.BeforeModel(rootCfg.Name); lb != nil {
 				if lp, lerr := plugin.New(plugin.Config{Name: "lessons", BeforeModelCallback: lb}); lerr == nil {
@@ -137,7 +139,7 @@ func buildPlugins(
 				}
 			}
 		}
-		if cep, cepClean, cerr := codingEfficiencyPlugin("coding_efficiency", lspMgr, bus, lessonAfter); cerr == nil && cep != nil {
+		if cep, cepClean, cerr := codingEfficiencyPlugin("coding_efficiency", lspMgr, bus, lessonBefore, lessonAfter); cerr == nil && cep != nil {
 			plugins = append(plugins, cep)
 			if cepClean != nil {
 				extraCleanups = append(extraCleanups, cepClean)
