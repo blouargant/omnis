@@ -397,9 +397,9 @@ func runBashStatus(ctx context.Context, in BashIn) (string, bashStatus, error) {
 	if len(in.Env) > 0 {
 		cmd.Env = append(os.Environ(), in.Env...)
 	}
-	cmd.WaitDelay = 5 * time.Second
+	cmd.WaitDelay = bashWaitDelay
 	out, err := cmd.CombinedOutput()
-	st := bashStatus{ran: true, exitCode: exitCodeOf(err)}
+	st := bashStatus{ran: true, exitCode: exitCodeOf(cmd, err)}
 	s := strings.TrimRight(string(out), "\n")
 	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
 		st.timedOut = true
@@ -414,17 +414,22 @@ func runBashStatus(ctx context.Context, in BashIn) (string, bashStatus, error) {
 	return capCommandOutput(s), st, nil
 }
 
-// exitCodeOf maps a command's Wait error to an exit code: 0 for none, the
-// process's code when it exited, -1 when it could not run or was killed.
-func exitCodeOf(err error) int {
+// bashWaitDelay is how long the Bash tool waits for the output pipes to close
+// once the shell has exited (a background child may hold them). A variable so
+// tests can shorten it.
+var bashWaitDelay = 5 * time.Second
+
+// exitCodeOf is the shell's own exit code once it has run: the process state's
+// code, which is 0 for a shell that exited cleanly even when Wait reports
+// exec.ErrWaitDelay because a background child kept the output pipe open, and
+// -1 when the shell was killed by a signal. Without a process state (the
+// command could not start) it is 0 for no error, else -1.
+func exitCodeOf(cmd *exec.Cmd, err error) int {
+	if cmd != nil && cmd.ProcessState != nil {
+		return cmd.ProcessState.ExitCode()
+	}
 	if err == nil {
 		return 0
-	}
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
-		if c := ee.ExitCode(); c >= 0 {
-			return c
-		}
 	}
 	return -1
 }

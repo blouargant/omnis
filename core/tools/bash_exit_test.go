@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/tool"
@@ -132,5 +133,36 @@ func TestNoObserverIsHarmless(t *testing.T) {
 	out, err := bash.Run(tc, map[string]any{"command": "exit 2"})
 	if err != nil || out["output"] == nil {
 		t.Fatalf("%v %v", out, err)
+	}
+}
+
+// A command that leaves a background child holding its output is judged by the
+// shell's own exit status: Wait's ErrWaitDelay after a clean exit is exit 0, and
+// a non-zero exit is still that code. The text the model sees is RunBash's.
+func TestBashExitStatusWithABackgroundChildHoldingTheOutput(t *testing.T) {
+	saved := bashWaitDelay
+	bashWaitDelay = 200 * time.Millisecond
+	t.Cleanup(func() { bashWaitDelay = saved })
+	rec := installRecorder(t)
+	bash := toolNamed(t, New(), "Bash")
+	tc := newBashCtx()
+	for _, c := range []struct {
+		cmd  string
+		code int
+	}{
+		{"sleep 1 & echo started", 0},
+		{"sleep 1 & echo started; exit 3", 3},
+	} {
+		want, _ := RunBash(context.Background(), BashIn{Command: c.cmd})
+		out, err := bash.Run(tc, map[string]any{"command": c.cmd})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := out["output"].(string); got != want {
+			t.Errorf("%q: output %q, want RunBash's %q", c.cmd, got, want)
+		}
+		if rec.code != c.code || rec.timedOut {
+			t.Errorf("%q: observed exit %d timedOut %v, want %d", c.cmd, rec.code, rec.timedOut, c.code)
+		}
 	}
 }
