@@ -193,13 +193,15 @@ func (s *lessonService) takeRunSlot(k runCountKey, now time.Time) bool {
 //     "password":"x") or an escaped quote (a command inside JSON);
 //   - a long flag naming a credential followed by a space and a value
 //     (--password x, --token x, --api-key x);
-//   - an environment-style name ending in _SECRET/_KEY/_TOKEN/_PASSWORD then "=";
+//   - an upper-case, environment-style name with a _SECRET, _KEY, _TOKEN,
+//     _PASSWORD or _PASSWD part then "=" (AWS_SECRET_ACCESS_KEY=, DB_PASSWORD=);
+//     case-sensitive, so code such as primary_key=True or cache_key = x is kept;
 //   - user:password@host in a URL;
 //   - a bearer token, an sk- key, a GitHub token (ghp_, gho_, github_pat_), a
 //     PEM private key header.
 var lessonSecretRE = regexp.MustCompile(`(?i)(?:password|passwd|secret|token|api[_-]?key|authorization)\\?["']?\s*[=:]` +
 	`|--(?:password|passwd|secret|token|api-key|apikey)\s+[^\s-]` +
-	`|\w_(?:secret|key|token|password)\s*=` +
+	`|(?-i:\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_(?:SECRET|KEY|TOKEN|PASSWORD|PASSWD)(?:_[A-Z0-9]+)*\s*=)` +
 	`|[a-z][a-z0-9+.-]*://[^\s/@:"]+:[^\s/@"]+@` +
 	`|bearer\s+\S{8,}|sk-\w{16,}|\b(?:ghp|gho)_[a-z0-9]{16,}|\bgithub_pat_\w{16,}|-----BEGIN [A-Z ]*PRIVATE KEY-----`)
 

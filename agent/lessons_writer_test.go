@@ -276,6 +276,10 @@ func TestSecretDetectionWidened(t *testing.T) {
 		`{"command":"GITHUB_TOKEN=abc gh pr list"}`,
 		`{"command":"OPENAI_KEY=abc run"}`,
 		`{"command":"APP_SECRET=abc run"}`,
+		`{"command":"MY_SECRET_VALUE=abc run"}`,
+		`AWS_SECRET_ACCESS_KEY=abc`,
+		`GITHUB_TOKEN=abc`,
+		`DB_PASSWORD=abc`,
 		`{"command":"git clone https://bob:s3cr3t@git.example.com/r.git"}`,
 		`{"command":"curl -H x ghp_abcdefghijklmnopqrstuvwxyz0123"}`,
 		`{"token":"gho_ABCDEFGHIJKLMNOPQRSTUVWX"}`,
@@ -295,6 +299,12 @@ func TestSecretDetectionWidened(t *testing.T) {
 		`{"command":"curl https://example.com/a?b=c"}`,
 		`{"command":"psql -p 5432 -h db"}`,
 		`{"command":"tool --token-file /run/t"}`,
+		`{"old_string":"id = Column(Integer, primary_key=True)"}`,
+		`{"new_string":"cache_key = f\"{user}:{page}\""}`,
+		`{"command":"python -c 'sorted(x, sort_key=lambda v: v)'"}`,
+		`primary_key=True`,
+		`cache_key = x`,
+		`sort_key=lambda`,
 	} {
 		if episodeLooksSecret(lessonEpisode{FailedArgs: a, WorkedArgs: a, ErrText: a}) {
 			t.Errorf("%s: wrongly dropped", a)
