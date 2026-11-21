@@ -89,12 +89,27 @@ func Signature(toolKey, errText string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// reLeadingCd matches a directory change that only prepares the real command:
+// `cd <dir> &&` or `cd <dir>;` (also pushd), with a quoted or bare directory.
+var reLeadingCd = regexp.MustCompile(`^\s*(?:cd|pushd)\s+(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*`)
+
 // ToolKey is "Bash:<first word>" for a Bash call, the tool name otherwise.
+// Leading `cd <dir> &&` segments are skipped: models often prefix a command
+// with one, and keying on `cd` would give the same mistake two signatures —
+// its lesson would then never match (measured: hints reached 40-80 % of the
+// repeats of an error, and one error got two lessons).
 func ToolKey(tool string, args map[string]any) string {
 	if tool != "Bash" {
 		return tool
 	}
 	cmd, _ := args["command"].(string)
+	for {
+		rest := reLeadingCd.ReplaceAllString(cmd, "")
+		if rest == cmd || strings.TrimSpace(rest) == "" {
+			break
+		}
+		cmd = rest
+	}
 	if w := firstWord(cmd); w != "" {
 		return "Bash:" + w
 	}

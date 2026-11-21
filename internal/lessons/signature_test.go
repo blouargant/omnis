@@ -47,6 +47,14 @@ func TestToolKeyBash(t *testing.T) {
 		{map[string]any{"command": "FOO=1 git status"}, "Bash:git"},
 		{map[string]any{"command": ""}, "Bash"},
 		{nil, "Bash"},
+		// A leading directory change is not the command: the same mistake
+		// with and without it must share one key, or its lesson never matches.
+		{map[string]any{"command": "cd /tmp/work && make test"}, "Bash:make"},
+		{map[string]any{"command": "cd \"/tmp/my work\" && ./bin/acme build"}, "Bash:./bin/acme"},
+		{map[string]any{"command": "cd /a; cd b && FOO=1 git status"}, "Bash:git"},
+		{map[string]any{"command": "pushd /x && kubectl get pods"}, "Bash:kubectl"},
+		{map[string]any{"command": "cd /tmp/work"}, "Bash:cd"},
+		{map[string]any{"command": "cd /tmp/work || exit 1"}, "Bash:cd"},
 	}
 	for _, c := range cases {
 		if got := ToolKey("Bash", c.args); got != c.want {
