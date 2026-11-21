@@ -74,20 +74,14 @@ func TestSuccessfulReloadAppliesPluginHookLayers(t *testing.T) {
 	}
 }
 
-// A reload that turns lessons off, then on again, flips the switch the lesson
-// callbacks read (one atomic load) and the Bash exit observer with it.
+// Lessons are off by default; a reload that turns them on, then off again,
+// flips the switch the lesson callbacks read (one atomic load) and the Bash
+// exit observer with it.
 func TestReloadFlipsTheLessonsSwitchBothWays(t *testing.T) {
 	m, infra, sys := bootPluginManager(t)
 	t.Setenv("OMNIS_LESSONS", "")
-	if !infra.Lessons.isEnabled() {
-		t.Fatal("lessons should be on after boot")
-	}
-	writeFile(t, filepath.Join(sys, "agents.json"), `{"agents": ["leader"], "router_squad": "none", "lessons": {"enabled": false}}`)
-	if _, err := m.Reload(context.Background(), Options{}); err != nil {
-		t.Fatal(err)
-	}
 	if infra.Lessons.isEnabled() {
-		t.Fatal("a reload that turns lessons off left them on")
+		t.Fatal("lessons should be off after boot (the default)")
 	}
 	writeFile(t, filepath.Join(sys, "agents.json"), `{"agents": ["leader"], "router_squad": "none", "lessons": {"enabled": true}}`)
 	if _, err := m.Reload(context.Background(), Options{}); err != nil {
@@ -95,5 +89,12 @@ func TestReloadFlipsTheLessonsSwitchBothWays(t *testing.T) {
 	}
 	if !infra.Lessons.isEnabled() {
 		t.Fatal("a reload that turns lessons on left them off")
+	}
+	writeFile(t, filepath.Join(sys, "agents.json"), `{"agents": ["leader"], "router_squad": "none", "lessons": {"enabled": false}}`)
+	if _, err := m.Reload(context.Background(), Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if infra.Lessons.isEnabled() {
+		t.Fatal("a reload that turns lessons off left them on")
 	}
 }

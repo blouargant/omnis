@@ -34,7 +34,8 @@ Collection memory keeps what **you** said. **Agent lessons** keep what an agent
 **learned by itself**: when it calls a tool wrongly, gets an error, then calls
 the same tool again correctly, Omnis stores a one-line lesson for that agent
 ("when listing pods in a namespace, pass `-n <namespace>`"). Nothing asks you
-to approve it, and no question or card is ever shown.
+to approve it, and no question or card is ever shown. **This is off by default**
+(see the last point below).
 
 - **When one is learned** — only after an error followed by a success of the
   same tool, in the same run. For a shell command, an error is a non-zero exit
@@ -64,9 +65,11 @@ to approve it, and no question or card is ever shown.
   only to that tool. Lessons are stored under `$OMNIS_HOME/lessons/<agent>/`
   (per user on a shared server; a chat whose owner cannot be identified gets
   no lesson behaviour at all rather than the shared folder).
-- **Switching it off** — for one agent, turn off **Learn from errors** in its
-  settings; for everything, set `OMNIS_LESSONS=false` or `lessons: {"enabled":
-  false}` in `agents.json`. Off, nothing is added to any prompt or error.
+- **Off by default** — in our measurements lessons did not reduce errors, tool
+  calls or cost, so they are not enabled unless you ask. Turn them on with
+  `OMNIS_LESSONS=true` or `lessons: {"enabled": true}` in `agents.json`. Once
+  on, turn off **Learn from errors** in an agent's settings to leave that agent
+  out. Off, nothing is added to any prompt or error.
 
 ## The StateLog (built during the session)
 

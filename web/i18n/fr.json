@@ -1128,6 +1128,6 @@
   "set.agent.lessons.delete": "Supprimer",
   "set.agent.lessons.deleteConfirm": "Supprimer cette leçon ? L'agent ne l'appliquera plus.",
   "set.agent.lessons.toggle": "Apprendre des erreurs",
-  "set.agent.lessons.toggleTip": "Activé par défaut. L'agent retient ce qui a corrigé une erreur d'outil et le réutilise. Désactivez pour arrêter d'apprendre et d'appliquer des leçons.",
+  "set.agent.lessons.toggleTip": "Ne s'applique que si les leçons d'agent sont activées pour la flotte (désactivées par défaut : `lessons.enabled` dans agents.json ou OMNIS_LESSONS=true). L'agent retient ce qui a corrigé une erreur d'outil et le réutilise. Désactivez pour exclure cet agent.",
   "set.agent.lessons.counters": "Vue {seen}, indice {hinted}, résolue {recovered}, répétée {repeated}"
 }

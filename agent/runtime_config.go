@@ -256,7 +256,7 @@ type runtimeConfigFile struct {
 	// axis; both 0 makes turns unbounded (the pre-budget behaviour).
 	// Overridable by OMNIS_TURN_MAX_TOOL_CALLS / OMNIS_TURN_MAX_TOKENS.
 	TurnBudget *turnBudgetFile `json:"turn_budget,omitempty"`
-	// Lessons is the fleet-wide agent-lessons switch. Absent ⇒ on.
+	// Lessons is the fleet-wide agent-lessons switch. Absent ⇒ off.
 	// OMNIS_LESSONS (when set) overrides it.
 	Lessons *lessonsFile `json:"lessons,omitempty"`
 	// Models is no longer a supported field in agents.json. It is detected
@@ -453,7 +453,7 @@ type RuntimeSettings struct {
 	// disables the gate entirely. See internal/budget and agent/budget_plugin.go.
 	TurnBudget budget.Limits
 	// LessonsEnabled is the resolved fleet-wide agent-lessons switch:
-	// OMNIS_LESSONS (when set) > agents.json lessons.enabled > on.
+	// OMNIS_LESSONS (when set) > agents.json lessons.enabled > off.
 	LessonsEnabled bool
 }
 
@@ -1416,7 +1416,11 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 			MaxToolCalls: budget.DefaultMaxToolCalls,
 			MaxTokens:    budget.DefaultMaxTokens,
 		},
-		LessonsEnabled: true,
+		// Off by default: on a bench built to favour them (four recurring
+		// environment traps, 750 sessions, omnis-benches
+		// reports/agent-lessons-gain-2026-11-20.md) lessons changed nothing on
+		// the production models and gave no significant gain on the cheap one.
+		LessonsEnabled: false,
 	}
 
 	explicitConfig := strings.TrimSpace(opts.ConfigPath) != ""
