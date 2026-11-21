@@ -19,7 +19,7 @@
 
 ## 2.3 (in development) — Agents learn from their tool errors
 
-- **Agents learn from their tool errors** — when a tool call fails and then works, the agent keeps a one-line lesson; the next time the same error appears the lesson is added to the error, and lessons that keep coming back are placed in the agent's prompt. See and delete them in Settings → Agents → an agent → Lessons; turn it off per agent with **Learn from errors**.
+- **Agents learn from their tool errors (opt-in)** — off by default; enable with `lessons: {"enabled": true}` in `agents.json` or `OMNIS_LESSONS=true`. When a tool call fails and then works, the agent keeps a one-line lesson; the next time the same error appears the lesson is added to the error, and lessons that keep coming back are placed in the agent's prompt. See and delete them in Settings → Agents → an agent → Lessons; leave one agent out with **Learn from errors**.
 
 ## 2.2 (in development) — Collection memory
 

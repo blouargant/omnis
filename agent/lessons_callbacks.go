@@ -56,7 +56,7 @@ type lessonService struct {
 	now     func() time.Time
 
 	// switchState is the fleet-wide switch: 0 = not set yet (enabledFn, else
-	// OMNIS_LESSONS, default on), 1 = on, 2 = off. The Manager sets it whenever
+	// OMNIS_LESSONS, default off), 1 = on, 2 = off. The Manager sets it whenever
 	// the current generation changes, so reading it is one atomic load.
 	switchState atomic.Int32
 	enabledFn   func() bool // tests only; read when switchState is 0
@@ -109,7 +109,7 @@ type pendingHint struct {
 
 // newLessonService builds the service. enabled, when non-nil, answers the
 // fleet-wide switch until setEnabledValue is called (tests); nil ⇒ the
-// OMNIS_LESSONS env var, default on.
+// OMNIS_LESSONS env var, default off.
 func newLessonService(enabled func() bool) *lessonService {
 	s := &lessonService{
 		queue:     make(chan lessonEpisode, lessonQueueCap),
@@ -156,7 +156,7 @@ func (s *lessonService) isEnabled() bool {
 	if on, ok := lessonsEnvSwitch(); ok {
 		return on
 	}
-	return true
+	return false
 }
 
 // syncBashObserver installs the Bash exit observer while lessons are on and

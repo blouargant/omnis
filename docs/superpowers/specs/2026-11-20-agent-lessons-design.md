@@ -266,8 +266,10 @@ Constants (the values shipped; the bench in omnis-benches,
 
 ### 8. Switches and visibility
 
-- `lessons: {enabled}` in `agents.json`, `OMNIS_LESSONS=false` (overrides it).
-  Default on. Read at call time from the current generation, so a reload that
+- `lessons: {enabled}` in `agents.json`, `OMNIS_LESSONS` (overrides it).
+  **Default off** since the gain bench of 2026-11-20 (omnis-benches
+  `reports/agent-lessons-gain-2026-11-20.md`) found no measurable gain; this
+  reverses the "default on" of the original design. Read at call time from the current generation, so a reload that
   turns it off also silences sessions draining on an older one.
 - Per agent: `"lessons": false` in `agent.json`.
 - Settings → Agent: a read-only **Lessons** list with state and counters, and a

@@ -1128,6 +1128,6 @@
   "set.agent.lessons.delete": "Löschen",
   "set.agent.lessons.deleteConfirm": "Diese Lektion löschen? Der Agent wendet sie nicht mehr an.",
   "set.agent.lessons.toggle": "Aus Fehlern lernen",
-  "set.agent.lessons.toggleTip": "Standardmäßig aktiviert. Der Agent merkt sich, was einen Tool-Fehler behoben hat, und nutzt es erneut. Deaktivieren, um das Lernen und Anwenden von Lektionen zu beenden.",
+  "set.agent.lessons.toggleTip": "Gilt nur, wenn Agent-Lektionen für die Flotte aktiviert sind (standardmäßig aus: `lessons.enabled` in agents.json oder OMNIS_LESSONS=true). Der Agent merkt sich, was einen Tool-Fehler behoben hat, und nutzt es erneut. Deaktivieren, um diesen Agenten auszunehmen.",
   "set.agent.lessons.counters": "Gesehen {seen}, Hinweis {hinted}, behoben {recovered}, wiederholt {repeated}"
 }

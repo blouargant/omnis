@@ -51,7 +51,7 @@ func lessonEnv(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("OMNIS_HOME", home)
-	t.Setenv("OMNIS_LESSONS", "")
+	t.Setenv("OMNIS_LESSONS", "true") // lessons are off by default; these tests exercise them on
 	SetHiddenSessionResolver(nil)
 	SetCollectionRootResolver(nil)
 	t.Cleanup(func() {
@@ -316,7 +316,9 @@ func TestLessonsSwitchPrecedence(t *testing.T) {
 		name, file, env string
 		want            bool
 	}{
-		{"default on", `{"agents":["leader"]}`, "", true},
+		{"default off", `{"agents":["leader"]}`, "", false},
+		{"agents.json on", `{"agents":["leader"],"lessons":{"enabled":true}}`, "", true},
+		{"env off over file", `{"agents":["leader"],"lessons":{"enabled":true}}`, "false", false},
 		{"agents.json off", `{"agents":["leader"],"lessons":{"enabled":false}}`, "", false},
 		{"env on over file", `{"agents":["leader"],"lessons":{"enabled":false}}`, "true", true},
 		{"env off", `{"agents":["leader"]}`, "false", false},

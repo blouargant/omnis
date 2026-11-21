@@ -20,7 +20,7 @@ shell before launching `make run-server` (or pass through a `.env` file).
 | Variable             | Purpose |
 |---|---|
 | `OMNIS_ROUTER_SQUAD`  | Overrides the `router_squad` key in `agents.json` — names the **Omnis** router squad that new chats start on. Absent ⇒ defaults to `omnis` (auto-injected if your config doesn't declare it). Set to `"none"` to disable routing, so new chats start directly on the picked squad (or `default`). See [Architecture → Omnis router](10-architecture.md#omnis-router-default-chat-routing). |
-| `OMNIS_LESSONS`          | `true`/`false`. Default `true`. `false` turns off agent lessons (hints on repeated tool errors, the lessons block in prompts, and the writer) for the whole fleet; overrides `lessons.enabled` in `agents.json`. See [Memory & Semantic Recall](20-learning-and-recall.md#lessons-from-tool-errors). |
+| `OMNIS_LESSONS`          | `true`/`false`. Default `false`. `true` turns on agent lessons (hints on repeated tool errors, the lessons block in prompts, and the writer) for the whole fleet; overrides `lessons.enabled` in `agents.json`. See [Memory & Semantic Recall](20-learning-and-recall.md#lessons-from-tool-errors). |
 
 ## Embedding / semantic recall
 

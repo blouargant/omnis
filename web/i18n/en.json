@@ -1128,6 +1128,6 @@
   "set.agent.lessons.delete": "Delete",
   "set.agent.lessons.deleteConfirm": "Delete this lesson? The agent will no longer apply it.",
   "set.agent.lessons.toggle": "Learn from errors",
-  "set.agent.lessons.toggleTip": "On by default. The agent notes what fixed a tool error and reuses it. Turn off to stop learning and applying lessons.",
+  "set.agent.lessons.toggleTip": "Applies only when agent lessons are enabled for the fleet (off by default: `lessons.enabled` in agents.json or OMNIS_LESSONS=true). The agent notes what fixed a tool error and reuses it. Turn off to leave this agent out.",
   "set.agent.lessons.counters": "Seen {seen}, hinted {hinted}, recovered {recovered}, repeated {repeated}"
 }

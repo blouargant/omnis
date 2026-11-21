@@ -18,7 +18,8 @@ import (
 // buildLessonFleet builds a real generation: a "default" squad led by leader
 // with one member "worker". routerSquad is written into agents.json as is.
 func buildLessonFleet(t *testing.T, routerSquad string) (*Instance, string) {
-	inst, home, _ := buildLessonFleetWith(t, routerSquad, "")
+	// Lessons are off by default; these tests exercise them on.
+	inst, home, _ := buildLessonFleetWith(t, routerSquad, `,"lessons":{"enabled":true}`)
 	return inst, home
 }
 
@@ -32,7 +33,7 @@ func buildLessonFleetWith(t *testing.T, routerSquad, extra string) (*Instance, s
 	t.Setenv("OMNIS_SYSTEM_CONFIG_DIR", layer)
 	t.Setenv("OMNIS_CONFIG_DIRS", layer)
 	t.Setenv("OMNIS_AGENTSKILLS_DIR", "")
-	t.Setenv("OMNIS_LESSONS", "")
+	t.Setenv("OMNIS_LESSONS", "") // the switch comes from agents.json (extra) in these tests
 	SetHiddenSessionResolver(nil)
 	SetCollectionRootResolver(nil)
 
@@ -54,6 +55,8 @@ func buildLessonFleetWith(t *testing.T, routerSquad, extra string) (*Instance, s
 	if err != nil {
 		t.Fatalf("build instance: %v", err)
 	}
+	// What NewManager / NewAgent do when a generation becomes current.
+	infra.Lessons.setEnabledValue(inst.Settings.LessonsEnabled)
 	return inst, home, infra
 }
 
@@ -194,7 +197,8 @@ func TestBeforeToolRecorderIsMounted(t *testing.T) {
 		name, extra string
 		want        bool
 	}{
-		{"on", "", true},
+		{"on", `,"lessons":{"enabled":true}`, true},
+		{"off by default", "", false},
 		{"off", `,"lessons":{"enabled":false}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

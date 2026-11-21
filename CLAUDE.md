@@ -2869,7 +2869,7 @@ per-user `agents.json` no longer freezes the whole config. The engine lives in
 
 | File | Purpose |
 |---|---|
-| `agents.json` | List of enabled agent names, squad composition, global paths, `router_squad` (Omnis router squad; absent ⇒ `omnis`, `"none"` disables), `start_squad` (the squad new chats start on instead of the router — see "Start squad" under the Omnis router; unknown/hidden ⇒ ignored), `lessons` (`{enabled}` — the fleet-wide agent-lessons switch, absent ⇒ on, `OMNIS_LESSONS` overrides; a per-agent `"lessons": false` in `agent.json` opts one agent out — see "Agent lessons"), and `turn_budget` (`{max_tool_calls, max_tokens}` — the per-turn spend ceiling before the user is asked whether to continue; both `0` ⇒ unbounded. See "Per-turn spend budget") |
+| `agents.json` | List of enabled agent names, squad composition, global paths, `router_squad` (Omnis router squad; absent ⇒ `omnis`, `"none"` disables), `start_squad` (the squad new chats start on instead of the router — see "Start squad" under the Omnis router; unknown/hidden ⇒ ignored), `lessons` (`{enabled}` — the fleet-wide agent-lessons switch, absent ⇒ **off**, `OMNIS_LESSONS` overrides; a per-agent `"lessons": false` in `agent.json` opts one agent out — see "Agent lessons"), and `turn_budget` (`{max_tool_calls, max_tokens}` — the per-turn spend ceiling before the user is asked whether to continue; both `0` ⇒ unbounded. See "Per-turn spend budget") |
 | `models.json` | Providers (credentials + endpoint) and reusable model profiles referenced by agents via `model_ref`. Per-model `"disable_streaming": true` forces agents using that model onto the non-streaming endpoint (for backends whose streamed output misbehaves). Per-model `"max_output_tokens"` (int, 0/absent ⇒ none sent) is sent as `max_tokens` on every request unless the request sets its own, on both the openai/openai_compat and native anthropic adapters (replaces the latter's 4096 default) — needed because a LiteLLM gateway fills a missing `max_tokens` with `DEFAULT_ANTHROPIC_CHAT_MAX_TOKENS` (4096) for Anthropic models absent from its bundled cost map (its deployment `model_info` is registered as `anthropic/<m>` but looked up as bare `<m>`, so it never applies), cutting replies and tool-call arguments mid-way; deliberately not auto-filled from `/model/info` (a vLLM backend rejects a `max_tokens` that doesn't fit beside the prompt). Both adapters also map the stop reason (`finish_reason` / `stop_reason`) onto `LLMResponse.FinishReason` — ADK's flow ignores it — and on `MAX_TOKENS` [core/llm/finish.go](core/llm/finish.go) `markTruncated` drops tool calls whose arguments were cut mid-JSON (`argsFromJSON`'s `_raw`), appends a `[Reply cut: …]` notice (also yielded as a partial when streaming, merged into the leading text part so surfaces' repeat-filter still skips the final), and logs `llm: <model> reply cut at the output limit`; since it lives in the adapter it reaches every surface and sub-agent. Per-model `"prompt_cache"` (tri-state `*bool`) adds Anthropic `cache_control` breakpoints for an upstream LiteLLM proxy; **default ON for `openai_compat`, OFF for plain `openai`**, explicit `true`/`false` overrides (see "Prompt caching via LiteLLM" below). Also: embedding models (`"embedding": true` + `"dim"`) and `"embed_model_ref"` selecting the internal embedder for semantic recall, plus `"eval_model_ref"` selecting the cheap "small fast" model for the `/goal` completion evaluator (falls back to the leader model). Top-level `"override_model_ref"` + `"override_model_enabled"` implement the **single-model override** ("run the whole fleet on one model"): when enabled, `applyModelOverride` ([agent/runtime_config.go](agent/runtime_config.go)) forces **every** agent onto that one model (overwriting each agent's own `model_ref`-resolved connection + pricing) at `ResolveRuntimeSettings` time — so it's hot-reloadable; disabling restores the per-agent config. The ref is kept while disabled so the toggle flips cleanly. Scoped to **agents only** — the internal embedder + `/goal` evaluator are untouched (and an `embedding:true` ref is ignored). Web UI: Settings → Models → General card ("Use one model for all agents"). Env: `OMNIS_OVERRIDE_MODEL_REF`/`OMNIS_OVERRIDE_MODEL_ENABLED` |
 | `registry/agents/<name>/agent.json` | Per-agent definition (model_ref, tools, skills, builtin flag, etc.) |
 | `registry/agents/<name>/instruction.md` | Per-agent system instruction (markdown) |
@@ -3268,7 +3268,7 @@ mistaken for a broken reference.
 | `OMNIS_GOAL_MAX_TURNS` | Hard ceiling on how many turns one `/goal` may drive before the loop stops regardless of the condition (default `30`) |
 | `OMNIS_TURN_MAX_TOOL_CALLS` | Per-turn tool-call ceiling before the user is asked whether to continue (default `2000`; `0` = no ceiling on this axis). Overrides `turn_budget.max_tool_calls` in `agents.json`. See "Per-turn spend budget" |
 | `OMNIS_TURN_MAX_TOKENS` | Per-turn token ceiling before the user is asked whether to continue (default `10000000`; `0` = no ceiling on this axis). Both axes `0` ⇒ unbounded turns (the pre-budget behaviour). Overrides `turn_budget.max_tokens` in `agents.json` |
-| `OMNIS_LESSONS` | `true`/`false` (default `true`) — agent lessons (learning from tool errors); `false` turns off hints, the prompt block and the writer for the whole fleet. Overrides `lessons.enabled` in `agents.json`. See "Agent lessons" |
+| `OMNIS_LESSONS` | `true`/`false` (default `false`: lessons are **off unless enabled**) — agent lessons (learning from tool errors); `true` turns on hints, the prompt block and the writer for the whole fleet, `false` turns them off. Overrides `lessons.enabled` in `agents.json`. See "Agent lessons" |
 | `OMNIS_TURN_MAX_SECONDS` | Per-turn wall-clock limit in seconds (default `0` = none). Never enforced: past half of it, every model call of the turn (root and sub-agents) carries a "N min left" note, and in the last fifth a "finish now" note. Overrides `turn_budget.max_seconds` in `agents.json`. Armed on the server and, for this axis only, on the CLI/TUI. See "Per-turn spend budget" |
 | `OMNIS_DOCS_DIRS` | Colon-separated documentation roots for `search_docs`/`list_docs`; replaces the auto-discovered set (`<webDir>/docs`, `/usr/share/omnis/web/docs`, `docs`, `/usr/share/doc/omnis/docs`) |
 | `OMNIS_SESSION_INDEX_IDLE` | How long the past-session search index may sit unused before it is dropped from memory (Go duration, default `10m`; `0` keeps it resident once loaded). The next search transparently re-reads it from disk. See "Session search" |
@@ -4654,9 +4654,24 @@ where prose can be skipped — not its offline replay of tasks.
   prompt (then id), NOT the live `seen`: a counter-only update must not reorder
   or change the block, or the system prompt (and the prompt cache) would change
   on every error. (Ordering by live `seen` would have been a prompt-cache bug.)
-- **Switches** (default on): `lessons: {enabled}` in `agents.json`
-  (`RuntimeSettings.LessonsEnabled`), `OMNIS_LESSONS=false` (overrides it), and
-  per agent `"lessons": false` in `agent.json` (`RuntimeAgentConfig.Lessons`,
+- **Switches — OFF by default, and why.** A bench built to favour the feature
+  (four environment traps a model cannot guess, each met in five sessions, both
+  arms × five repetitions, 750 sessions;
+  `omnis-benches/reports/agent-lessons-gain-2026-11-20.md`) found **no
+  measurable gain**: on the production tiers (`coder` on `premium`) tool calls
+  +1 % and **no hint delivered in 100 trap sessions**; on `balanced` −5 to −8 %
+  tool calls, not significant (p ≥ 0.14). Three causes: models recover alone in
+  1–3 calls, so a hint saves under one call; a lesson in the prompt does not
+  stop `balanced` from making the error again; and `premium` chains several
+  commands in 79 % of its Bash calls, which breaks the one-call-one-command
+  model this feature rests on (the tool key is the first word, the exit status
+  the last command's, the error text everybody's output) — a design limit, not
+  a tuning problem. Untested: errors that are costly to recover from. **Do not
+  turn the default back on without a bench that shows a gain.** Enable with
+  `lessons: {"enabled": true}` in `agents.json`
+  (`RuntimeSettings.LessonsEnabled`) or `OMNIS_LESSONS=true` (the env var
+  overrides the file either way); per agent, opt out with
+  `"lessons": false` in `agent.json` (`RuntimeAgentConfig.Lessons`,
   surfaced by the config GET only when off). Callbacks are mounted only when
   `lessonsActive(runtime, cfg)` (decided from the settings being BUILT, never
   from the current generation) **and** each call re-checks `isEnabled()` — one
