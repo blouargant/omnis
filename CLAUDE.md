@@ -1545,8 +1545,9 @@ the 2026-11-07 Harbor traces one edit in three went through the shell. Spec:
   and `wget -O`, `zip` and `tar -c…f` archives, and inline Python (`-c` or a
   heredoc body: `open('P','w'|'a'|'x')`, `Path('P').write_text/write_bytes`, and
   the same through a variable assigned a literal earlier). Heredoc bodies are cut
-  off first (`splitHeredocs`, own quote scanner) so their text is never read as
-  shell; segments come from `splitWithOps` (the `unquotedMask` split keeping the
+  off first (`splitHeredocs`, own quote scanner, which also drops `#` comments
+  and blanks `<`/`>` inside `((…))`/`$((…))`, so a shift is not a heredoc) so
+  their text is never read as shell; `>|` is a redirect, not a pipe; segments come from `splitWithOps` (the `unquotedMask` split keeping the
   operators, so a `cd` in a pipeline/background/subshell is ignored) and a
   `cd DIR` changes the directory of what follows (unresolvable ⇒ relative
   candidates dropped). A word with `$`, a backtick or a glob is dropped, `~/`
@@ -1656,8 +1657,8 @@ compose (fusion → dedup → shaper):
    own multi-file blast radius). `lsp_diagnostics` itself still returns the
    **full** set (the explicit "show me the state" call).
    **Also after `Bash`** when it wrote files (`fstools.ShellWrites(call id)`, see
-   "Files written through the shell"): `fusePaths` appends the same delta and the
-   fused result skips the shaper; `looksLikeError` is not applied (a failing test
+   "Files written through the shell"): the Bash output is shaped FIRST (it can be
+   ~50 KB) and `fusePaths` appends the same delta after the cut; `looksLikeError` is not applied (a failing test
    run after a `sed -i` is when the delta helps); no running server ⇒ the result
    is shaped exactly as before. `codingEfficiency.diags` is the test seam over
    `DiagnosticsIfRunning`.

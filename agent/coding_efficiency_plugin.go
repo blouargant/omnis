@@ -202,13 +202,18 @@ func (ce *codingEfficiency) afterTool(tc adk.ToolContext, t tool.Tool, args, res
 		return ce.fuse(tc, sid, cwd, name, args, result), nil
 	}
 	// A Bash call that wrote files (sed -i, a heredoc, inline Python): the Bash
-	// tool stored them under the call id. Fuse their delta like an edit's, and
-	// skip the shaper then. A non-destructive read: the server takes the entry.
-	// looksLikeError is not applied — a failing test run after a sed -i is
-	// exactly when the delta helps.
+	// tool stored them under the call id. Fuse their delta like an edit's. A
+	// Bash output can be ~50 KB, so it is shaped FIRST and the delta appended
+	// after the cut (never what gets cut). A non-destructive read: the server
+	// takes the entry. looksLikeError is not applied — a failing test run after
+	// a sed -i is exactly when the delta helps.
 	if name == "Bash" {
 		if ws := fstools.ShellWrites(callIDOf(tc)); len(ws) > 0 {
-			if m := ce.fusePaths(tc, sid, cwd, shellWritePaths(ws), result); m != nil {
+			base := result
+			if shaped, ok := shapeResult(name, result); ok {
+				base = shaped
+			}
+			if m := ce.fusePaths(tc, sid, cwd, shellWritePaths(ws), base); m != nil {
 				return m, nil
 			}
 		}

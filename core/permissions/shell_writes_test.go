@@ -173,3 +173,28 @@ func TestShellWriteTargetsLargeCommand(t *testing.T) {
 		t.Fatalf("python took %v", d)
 	}
 }
+
+// Final review: >| is a redirect, and a << that is not a heredoc (arithmetic,
+// a comment) must not swallow the lines after it.
+func TestShellWriteTargetsReviewFixes(t *testing.T) {
+	cases := []struct {
+		cmd  string
+		want []string
+	}{
+		{"echo x >| y.txt", []string{"/work/y.txt"}},
+		{"cmd 2>| e.txt | tee t.txt", []string{"/work/e.txt", "/work/t.txt"}},
+		{"echo $((1<<2))\necho y > after.txt", []string{"/work/after.txt"}},
+		{"for ((i=1<<2;i<9;i++)); do :; done\necho > after2.txt", []string{"/work/after2.txt"}},
+		{"echo ok # see <<EOF\nnext > w.txt", []string{"/work/w.txt"}},
+		// A '#' inside a word is not a comment: bash starts a heredoc here.
+		{"echo a#<<b > c.txt\necho d > e.txt", []string{"/work/c.txt"}},
+		{"echo ok # x > c2.txt\necho > d.txt", []string{"/work/d.txt"}},
+		{"echo $((8>>1)) > half.txt", []string{"/work/half.txt"}},
+	}
+	for _, c := range cases {
+		got := ShellWriteTargets(c.cmd, "/work")
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("ShellWriteTargets(%q) = %#v, want %#v", c.cmd, got, c.want)
+		}
+	}
+}

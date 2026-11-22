@@ -268,7 +268,7 @@ func TestAfterToolBashWithWrites(t *testing.T) {
 	bash := namedTool{name: "Bash"}
 	big := strings.Repeat("x", 40000)
 
-	// A diagnostic to report: the result is fused and not shaped.
+	// A diagnostic to report: the result is fused.
 	ce := newCodingEfficiency(nil)
 	ce.diags = fakeDiags(true)
 	fstools.RecordShellWrites("ce-c1", []fstools.ShellWrite{{Path: "/w/a.go"}})
@@ -278,7 +278,7 @@ func TestAfterToolBashWithWrites(t *testing.T) {
 		t.Fatal("afterTool returned nil")
 	}
 	out := got["output"].(string)
-	if !strings.HasPrefix(out, big) || !strings.Contains(out, "diagnostics: 1 new") {
+	if !strings.HasPrefix(out, big[:1000]) || !strings.Contains(out, "diagnostics: 1 new") {
 		t.Fatalf("fused output not as expected (len %d)", len(out))
 	}
 	if fstools.ShellWrites("ce-c1") == nil {
@@ -303,5 +303,22 @@ func TestAfterToolBashNoWrites(t *testing.T) {
 	got, _ := ce.afterTool(newLessonCtx("ce-s3", "inv").withCall("ce-c3"), namedTool{name: "Bash"}, nil, map[string]any{"output": "ok"}, nil)
 	if got != nil {
 		t.Fatalf("got %v, want nil", got)
+	}
+}
+
+// Final review: a fused Bash result is still capped like any Bash output; the
+// diagnostics delta is appended after the cut so it is never what gets cut.
+func TestAfterToolBashFusedIsShaped(t *testing.T) {
+	bashTrack(t)
+	ce := newCodingEfficiency(nil)
+	ce.diags = fakeDiags(true)
+	fstools.RecordShellWrites("ce-c5", []fstools.ShellWrite{{Path: "/w/a.go"}})
+	got, _ := ce.afterTool(newLessonCtx("ce-s5", "inv").withCall("ce-c5"), namedTool{name: "Bash"}, nil, map[string]any{"output": strings.Repeat("y", 50000)}, nil)
+	if got == nil {
+		t.Fatal("afterTool returned nil")
+	}
+	out := got["output"].(string)
+	if len(out) > shaperMaxChars+2000 || !strings.HasSuffix(strings.TrimSpace(out), "0 resolved, 0 unchanged") {
+		t.Fatalf("fused Bash output not shaped then fused (len %d, tail %q)", len(out), out[len(out)-60:])
 	}
 }

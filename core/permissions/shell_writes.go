@@ -130,6 +130,10 @@ func splitWithOps(cmd string) []opSegment {
 		if matched == "&" && isRedirectAmp(cmd, i) {
 			matched = ""
 		}
+		// `>|` is a redirect (clobber), not a pipe.
+		if matched == "|" && i > 0 && cmd[i-1] == '>' && active[i-1] {
+			matched = ""
+		}
 		if matched != "" {
 			flush(matched)
 			i += len(matched) - 1
@@ -737,7 +741,7 @@ type heredocTag struct {
 // << starts a heredoc. An operator with no tag, or a body never terminated,
 // still yields one (possibly partial) body so the count matches the lexer's.
 func splitHeredocs(cmd string) (string, []string) {
-	if !strings.Contains(cmd, "<<") {
+	if !strings.Contains(cmd, "<<") && !strings.Contains(cmd, "((") && !strings.Contains(cmd, "#") {
 		return cmd, nil
 	}
 	var out strings.Builder
@@ -770,6 +774,31 @@ func splitHeredocs(cmd string) (string, []string) {
 		case ch == '\'' || ch == '"':
 			quote = ch
 			out.WriteByte(ch)
+		case ch == '#' && (i == 0 || strings.IndexByte(" \t\n;&|()", cmd[i-1]) >= 0):
+			// A comment runs to the end of the line; it is dropped so its text
+			// (a `<<`, a `>`) is never read as shell.
+			for i+1 < n && cmd[i+1] != '\n' {
+				i++
+			}
+		case strings.HasPrefix(cmd[i:], "(("):
+			// Arithmetic ((…)) or $((…)): copied with < and > blanked, so
+			// a shift is neither a heredoc nor a redirect.
+			depth := 0
+			for ; i < n; i++ {
+				c := cmd[i]
+				switch c {
+				case '(':
+					depth++
+				case ')':
+					depth--
+				case '<', '>':
+					c = ' '
+				}
+				out.WriteByte(c)
+				if depth == 0 {
+					break
+				}
+			}
 		case strings.HasPrefix(cmd[i:], "<<<"):
 			out.WriteString("<<<")
 			i += 2
