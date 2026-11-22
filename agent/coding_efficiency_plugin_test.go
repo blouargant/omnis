@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	fstools "github.com/blouargant/omnis/core/tools"
 	"github.com/blouargant/omnis/internal/lsp"
 )
 
@@ -216,5 +218,90 @@ func TestShapeResultWebFetchCapAndHint(t *testing.T) {
 	// Other tools keep the larger default budget.
 	if _, ok := shapeResult("Grep", map[string]any{"matches": page[:25000]}); ok {
 		t.Error("Grep at 25k chars is under the default budget and must not be capped")
+	}
+}
+
+func fakeDiags(ok bool) func(context.Context, string) ([]lsp.Diagnostic, bool) {
+	return func(context.Context, string) ([]lsp.Diagnostic, bool) {
+		if !ok {
+			return nil, false
+		}
+		d := lsp.Diagnostic{Message: "undefined: x"}
+		d.Range.Start.Line = 2
+		return []lsp.Diagnostic{d}, true
+	}
+}
+
+func TestFusePathsAppendsDelta(t *testing.T) {
+	ce := newCodingEfficiency(nil)
+	ce.diags = fakeDiags(true)
+	res := map[string]any{"output": "ran sed"}
+	got := ce.fusePaths(nil, "s1", "/w", []string{"/w/a.go"}, res)
+	if got == nil {
+		t.Fatal("fusePaths returned nil")
+	}
+	out := got["output"].(string)
+	if !strings.HasPrefix(out, "ran sed\n\n") || !strings.Contains(out, "a.go — diagnostics: 1 new") || !strings.Contains(out, "L3 undefined: x") {
+		t.Fatalf("fused output = %q", out)
+	}
+	if res["output"] != "ran sed" {
+		t.Fatal("fusePaths changed the original map")
+	}
+}
+
+func TestFusePathsNoServer(t *testing.T) {
+	ce := newCodingEfficiency(nil)
+	ce.diags = fakeDiags(false)
+	if got := ce.fusePaths(nil, "s1", "/w", []string{"/w/a.go"}, map[string]any{"output": "x"}); got != nil {
+		t.Fatalf("got %v, want nil", got)
+	}
+}
+
+func bashTrack(t *testing.T) {
+	t.Helper()
+	fstools.EnableShellWriteTracking(true)
+	t.Cleanup(func() { fstools.EnableShellWriteTracking(false) })
+}
+
+func TestAfterToolBashWithWrites(t *testing.T) {
+	bashTrack(t)
+	bash := namedTool{name: "Bash"}
+	big := strings.Repeat("x", 40000)
+
+	// A diagnostic to report: the result is fused and not shaped.
+	ce := newCodingEfficiency(nil)
+	ce.diags = fakeDiags(true)
+	fstools.RecordShellWrites("ce-c1", []fstools.ShellWrite{{Path: "/w/a.go"}})
+	tc := newLessonCtx("ce-s1", "inv").withCall("ce-c1")
+	got, _ := ce.afterTool(tc, bash, nil, map[string]any{"output": big}, nil)
+	if got == nil {
+		t.Fatal("afterTool returned nil")
+	}
+	out := got["output"].(string)
+	if !strings.HasPrefix(out, big) || !strings.Contains(out, "diagnostics: 1 new") {
+		t.Fatalf("fused output not as expected (len %d)", len(out))
+	}
+	if fstools.ShellWrites("ce-c1") == nil {
+		t.Fatal("afterTool must not take the entry (the server does)")
+	}
+
+	// No server running: exactly the shaping of a Bash result without writes.
+	ce2 := newCodingEfficiency(nil)
+	ce2.diags = fakeDiags(false)
+	fstools.RecordShellWrites("ce-c2", []fstools.ShellWrite{{Path: "/w/a.go"}})
+	withWrites, _ := ce2.afterTool(newLessonCtx("ce-s2", "inv").withCall("ce-c2"), bash, nil, map[string]any{"output": big}, nil)
+	without, _ := ce2.afterTool(newLessonCtx("ce-s2", "inv").withCall("ce-none"), bash, nil, map[string]any{"output": big}, nil)
+	if withWrites == nil || without == nil || withWrites["output"] != without["output"] {
+		t.Fatal("a Bash result with unreported writes must be shaped like one without")
+	}
+}
+
+func TestAfterToolBashNoWrites(t *testing.T) {
+	bashTrack(t)
+	ce := newCodingEfficiency(nil)
+	ce.diags = fakeDiags(true)
+	got, _ := ce.afterTool(newLessonCtx("ce-s3", "inv").withCall("ce-c3"), namedTool{name: "Bash"}, nil, map[string]any{"output": "ok"}, nil)
+	if got != nil {
+		t.Fatalf("got %v, want nil", got)
 	}
 }

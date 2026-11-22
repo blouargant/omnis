@@ -1529,6 +1529,58 @@ for first on the Harness Leaderboard at about half the cost per solved task:
   Repairing the model's FunctionCall in place means events, hooks, the gate,
   the tool and the persisted history all see the corrected arguments.
 
+### Files written through the shell (`ShellWriteTargets` + the Bash write store)
+
+Only `Write`/`Edit`/`MultiEdit`/`revert` used to tell omnis a file changed; a
+file written by `Bash` (heredoc, `sed -i`, inline Python, `pandoc -o`) was
+invisible to the Results card, the download card and an open Monaco tab — and in
+the 2026-11-07 Harbor traces one edit in three went through the shell. Spec:
+[docs/superpowers/specs/2026-11-22-shell-written-files-design.md](docs/superpowers/specs/2026-11-22-shell-written-files-design.md).
+
+- **Candidates from the text** — `permissions.ShellWriteTargets(command, cwd)`
+  ([core/permissions/shell_writes.go](core/permissions/shell_writes.go)):
+  output redirects (`>`, `>>`, `>|`, `&>`; not `>&N`/`>&-`), `tee`, `sed -i` /
+  `perl -i` file operands, `cp`/`mv`/`install` destinations (into an existing
+  directory ⇒ `dir/basename(src)`), the output option of `pandoc`/`curl`/`sort`
+  and `wget -O`, `zip` and `tar -c…f` archives, and inline Python (`-c` or a
+  heredoc body: `open('P','w'|'a'|'x')`, `Path('P').write_text/write_bytes`, and
+  the same through a variable assigned a literal earlier). Heredoc bodies are cut
+  off first (`splitHeredocs`, own quote scanner) so their text is never read as
+  shell; segments come from `splitWithOps` (the `unquotedMask` split keeping the
+  operators, so a `cd` in a pipeline/background/subshell is ignored) and a
+  `cd DIR` changes the directory of what follows (unresolvable ⇒ relative
+  candidates dropped). A word with `$`, a backtick or a glob is dropped, `~/`
+  expands, `/dev/…` and `/proc/…` are dropped; ≤ 16 candidates, absolute, deduped.
+  Python code is scanned with `strings.Index` + an anchored regexp on a 512-byte
+  window (≤ 256 matches): whole-code regexps took 176 ms on a 1 MB body.
+- **Checked on disk, in the tool** — both `Bash` handlers (and the read-only one)
+  wrap `runBashStatus` with `trackBashWrites(ctx, command, cwd)`
+  ([core/tools/shell_writes.go](core/tools/shell_writes.go)): stat each candidate
+  before, stat again after (whatever the exit status); a candidate is **written**
+  when it is now a regular file (symlink followed, reported under the path as
+  written) that did not exist (`Created`) or whose mtime/size changed. Done in the
+  tool, not in the SSE consumer, which reads events from a buffered channel and
+  could stat after a fast command already wrote. Stored under the **call id**
+  (`RecordShellWrites` / `ShellWrites` non-destructive / `TakeShellWrites`;
+  1024 entries, 10 min). The model-visible result is unchanged.
+- **Off unless the server enables it** — `EnableShellWriteTracking(true)` in
+  [server/main.go](server/main.go). Off (CLI, TUI, tests) ⇒ no parse, no stat, and
+  the handler does not even ask the context for its call id (`trackBashWrites`
+  reads `FunctionCallID()` only when on and recovers a panic: test mocks panic on
+  it). A panic in parse/stat is recovered and logged; the command runs normally.
+- **Server** — `emitShellWrites` in `streamEvents` ([server/sse.go](server/sse.go)),
+  beside `emitFileChanged` on both the root `tool_result` and the sub-agent
+  `agent_tool_result` paths, takes the entry of a `Bash` result: `file_changed`
+  with `tool: "write"` (created) or `"edit"`, `FireFileChange`, and
+  `recordProducedFile` for a created file passing `shellProducedWorthy`
+  ([server/produced_files.go](server/produced_files.go)): an extension that is not
+  `.log .out .err .tmp .pid .lock .bak .swp .pyc .o`, no hidden component, nothing
+  under `node_modules`/`__pycache__`/`target`/`dist`/`build`; `/tmp` files pass.
+- **Not covered**: indirect writes (`python build.py`, `make`, formatters),
+  `patch`/`git apply`, `revert` snapshots and the per-file lock for shell writes,
+  `bash_background`/`monitor`/the `!` escape/the terminal dock, and injected turns
+  (they emit no SSE tool frames).
+
 ### Coding squad (token-efficient code intelligence)
 
 The **Coding** squad is a **coordinating leader + specialist members** tree tuned
@@ -1603,6 +1655,12 @@ compose (fusion → dedup → shaper):
    `lsp_code_action` / `ast_grep_rewrite` are **not** fused (they summarise their
    own multi-file blast radius). `lsp_diagnostics` itself still returns the
    **full** set (the explicit "show me the state" call).
+   **Also after `Bash`** when it wrote files (`fstools.ShellWrites(call id)`, see
+   "Files written through the shell"): `fusePaths` appends the same delta and the
+   fused result skips the shaper; `looksLikeError` is not applied (a failing test
+   run after a `sed -i` is when the delta helps); no running server ⇒ the result
+   is shaped exactly as before. `codingEfficiency.diags` is the test seam over
+   `DiagnosticsIfRunning`.
 2. **Unchanged-read dedup** — a re-`Read` of a file whose returned bytes are
    identical to a prior read this session is replaced by a one-line "unchanged"
    stub. Keys on the **SHA-256 of the returned content**, so it self-invalidates
@@ -8718,6 +8776,8 @@ sessions, live in at most one pane).
   `noteFileTool` records `{path, tool}` per `call_id` at the tool-call,
   `emitFileChanged` fires it at the tool-result only when the result isn't an
   `Error …` string).
+  A file written by a `Bash` command emits `file_changed` too (`tool: "write"`
+  when created, else `"edit"`) — see "Files written through the shell".
   Both the leader (`tool_call`/`tool_result`) and sub-agent
   (`agent_tool_call`/`agent_tool_result`) paths are wired. The client
   ([web/app.js](web/app.js) `onAgentFileChanged`) refreshes any open editor model
