@@ -167,3 +167,24 @@ func TestStreamSubAgentBashWrites(t *testing.T) {
 	frames := streamFrames(t, "sw-sess3", nil, bus)
 	assertShellWriteFrames(t, frames, report, old, "sw-sess3", "sw-c3")
 }
+
+// A new file the Results filter rejects (a log, a temp file) still refreshes
+// the editor and the Files panel, but as an "edit": "write" would make the web
+// UI offer it as a download card.
+func TestStreamNewNoiseFileIsNotOfferedAsDownload(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	fstools.EnableShellWriteTracking(true)
+	t.Cleanup(func() { fstools.EnableShellWriteTracking(false) })
+	logFile := filepath.Join(t.TempDir(), "t.log")
+	if err := os.WriteFile(logFile, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fstools.RecordShellWrites("sw-log", []fstools.ShellWrite{{Path: logFile, Created: true}})
+	fc := fileChangedFrames(streamFrames(t, "sw-log-sess", bashEvents("sw-log"), nil))
+	if len(fc) != 1 || fc[0]["path"] != logFile || fc[0]["tool"] != "edit" {
+		t.Fatalf("file_changed frames = %v, want one edit of %s", fc, logFile)
+	}
+	if got, _ := sessions.LoadProducedFiles("sw-log-sess"); len(got) != 0 {
+		t.Fatalf("produced = %+v, want none", got)
+	}
+}

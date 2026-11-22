@@ -1572,8 +1572,10 @@ the 2026-11-07 Harbor traces one edit in three went through the shell. Spec:
 - **Server** — `emitShellWrites` in `streamEvents` ([server/sse.go](server/sse.go)),
   beside `emitFileChanged` on both the root `tool_result` and the sub-agent
   `agent_tool_result` paths, takes the entry of a `Bash` result: `file_changed`
-  with `tool: "write"` (created) or `"edit"`, `FireFileChange`, and
-  `recordProducedFile` for a created file passing `shellProducedWorthy`
+  with `tool: "write"` for a created file passing `shellProducedWorthy`, else
+  `"edit"` (a new log or temp file must not get a download card, which the web
+  UI shows for `write`), `FireFileChange`, and `recordProducedFile` for that
+  same created, non-noise file
   ([server/produced_files.go](server/produced_files.go)): an extension that is not
   `.log .out .err .tmp .pid .lock .bak .swp .pyc .o`, no hidden component, nothing
   under `node_modules`/`__pycache__`/`target`/`dist`/`build`; `/tmp` files pass.
@@ -8778,7 +8780,7 @@ sessions, live in at most one pane).
   `emitFileChanged` fires it at the tool-result only when the result isn't an
   `Error …` string).
   A file written by a `Bash` command emits `file_changed` too (`tool: "write"`
-  when created, else `"edit"`) — see "Files written through the shell".
+  when created and not a log or temp file, else `"edit"`) — see "Files written through the shell".
   Both the leader (`tool_call`/`tool_result`) and sub-agent
   (`agent_tool_call`/`agent_tool_result`) paths are wired. The client
   ([web/app.js](web/app.js) `onAgentFileChanged`) refreshes any open editor model
