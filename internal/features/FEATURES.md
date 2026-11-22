@@ -19,6 +19,7 @@
 
 ## 2.3 (in development) — Agents learn from their tool errors
 
+- **Shell-written files** — files an agent writes with a shell command appear in Results and refresh the open editor.
 - **Agents learn from their tool errors (opt-in)** — off by default; enable with `lessons: {"enabled": true}` in `agents.json` or `OMNIS_LESSONS=true`. When a tool call fails and then works, the agent keeps a one-line lesson; the next time the same error appears the lesson is added to the error, and lessons that keep coming back are placed in the agent's prompt. See and delete them in Settings → Agents → an agent → Lessons; leave one agent out with **Learn from errors**.
 
 ## 2.2 (in development) — Collection memory

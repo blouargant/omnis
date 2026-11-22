@@ -912,6 +912,30 @@ func streamEvents(
 		// server has the doc open). fe.path is already absolute.
 		toolkitagent.FireFileChange(fe.path)
 	}
+	// Files a Bash call wrote (heredoc, sed -i, pandoc -o …): the Bash tool
+	// checked them on disk and stored them under the call id. A created file
+	// that is not noise reads as a "write" (download card, produced file),
+	// any other as an "edit"; both refresh the editor and the Files panel.
+	emitShellWrites := func(toolName, callID string) {
+		if toolName != "Bash" {
+			return
+		}
+		for _, w := range fstools.TakeShellWrites(callID) {
+			// "write" makes the web UI offer a download card, so it is kept
+			// for a new file that is also a result: a new log or temp file
+			// only refreshes the editor and the Files panel.
+			produced := w.Created && shellProducedWorthy(w.Path)
+			tool := "edit"
+			if produced {
+				tool = "write"
+			}
+			emit("file_changed", map[string]any{"path": w.Path, "tool": tool})
+			if produced {
+				recordProducedFile(ownSession, w.Path)
+			}
+			toolkitagent.FireFileChange(w.Path)
+		}
+	}
 
 	// Convert the rangefunc ADK iterator to a channel so we can select on it
 	// alongside the sub-agent bus event channel.
@@ -997,6 +1021,7 @@ func streamEvents(
 				"call_id":     callID,
 			})
 			emitFileChanged(callID, resp)
+			emitShellWrites(toolName, callID)
 			recordSkillLoad(ownSession, agentName, toolName, resp)
 		case events.EventToolError:
 			errMsg, _ := p["error"].(string)
@@ -1167,6 +1192,7 @@ func streamEvents(
 						}
 						emit("tool_result", result)
 						emitFileChanged(p.FunctionResponse.ID, p.FunctionResponse.Response)
+						emitShellWrites(p.FunctionResponse.Name, p.FunctionResponse.ID)
 						recordSkillLoad(ownSession, rootAgent, p.FunctionResponse.Name, p.FunctionResponse.Response)
 					}
 					sawPartialText = false

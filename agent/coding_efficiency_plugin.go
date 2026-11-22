@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -118,6 +119,10 @@ func isFusionTool(name string) bool {
 // caches, which is why a squad handoff can't serve another squad a stale stub.
 type codingEfficiency struct {
 	lspMgr *lsp.Manager
+	// diags returns a file's diagnostics when a language server is already
+	// running for it (ok == false otherwise). Defaults to
+	// lspMgr.DiagnosticsIfRunning; nil when there is no manager. Tests stub it.
+	diags func(ctx context.Context, path string) ([]lsp.Diagnostic, bool)
 
 	mu       sync.Mutex
 	readHash map[string]string              // session\x00path → last returned content hash
@@ -125,11 +130,17 @@ type codingEfficiency struct {
 }
 
 func newCodingEfficiency(lspMgr *lsp.Manager) *codingEfficiency {
-	return &codingEfficiency{
+	ce := &codingEfficiency{
 		lspMgr:   lspMgr,
 		readHash: map[string]string{},
 		diagPrev: map[string]map[string]struct{}{},
 	}
+	if lspMgr != nil {
+		ce.diags = func(ctx context.Context, path string) ([]lsp.Diagnostic, bool) {
+			return lspMgr.DiagnosticsIfRunning(ctx, path, fuseMaxWait, fuseQuiet)
+		}
+	}
+	return ce
 }
 
 // codingEfficiencyPlugin builds the plugin and a cleanup that detaches its bus
@@ -189,6 +200,23 @@ func (ce *codingEfficiency) afterTool(tc adk.ToolContext, t tool.Tool, args, res
 	//    the appended diagnostics line is never what gets truncated.
 	if isFusionTool(name) {
 		return ce.fuse(tc, sid, cwd, name, args, result), nil
+	}
+	// A Bash call that wrote files (sed -i, a heredoc, inline Python): the Bash
+	// tool stored them under the call id. Fuse their delta like an edit's. A
+	// Bash output can be ~50 KB, so it is shaped FIRST and the delta appended
+	// after the cut (never what gets cut). A non-destructive read: the server
+	// takes the entry. looksLikeError is not applied — a failing test run after
+	// a sed -i is exactly when the delta helps.
+	if name == "Bash" {
+		if ws := fstools.ShellWrites(callIDOf(tc)); len(ws) > 0 {
+			base := result
+			if shaped, ok := shapeResult(name, result); ok {
+				base = shaped
+			}
+			if m := ce.fusePaths(tc, sid, cwd, shellWritePaths(ws), base); m != nil {
+				return m, nil
+			}
+		}
 	}
 
 	changed := false
@@ -254,7 +282,7 @@ func subAgentShaperCallback() llmagent.AfterToolCallback {
 // Returns nil (no change) on a failed/no-op edit, when no server is running for
 // any touched file, or when there's nothing to report.
 func (ce *codingEfficiency) fuse(tc adk.ToolContext, sid, cwd, name string, args, result map[string]any) map[string]any {
-	if ce.lspMgr == nil {
+	if ce.diags == nil {
 		return nil
 	}
 	field, text := dominantString(result)
@@ -265,6 +293,23 @@ func (ce *codingEfficiency) fuse(tc adk.ToolContext, sid, cwd, name string, args
 	if len(paths) == 0 {
 		return nil
 	}
+	return ce.fusePaths(tc, sid, cwd, paths, result)
+}
+
+// fusePaths appends the diagnostics delta of paths to result's dominant
+// string. Nil when no server runs for any of them, or nothing to report.
+func (ce *codingEfficiency) fusePaths(tc adk.ToolContext, sid, cwd string, paths []string, result map[string]any) map[string]any {
+	if ce.diags == nil || len(paths) == 0 {
+		return nil
+	}
+	field, text := dominantString(result)
+	if field == "" {
+		return nil
+	}
+	var ctx context.Context
+	if tc != nil {
+		ctx = tc
+	}
 	var notes []string
 	fused, overflow := 0, 0
 	for _, p := range paths {
@@ -272,7 +317,7 @@ func (ce *codingEfficiency) fuse(tc adk.ToolContext, sid, cwd, name string, args
 			overflow++
 			continue
 		}
-		diags, ok := ce.lspMgr.DiagnosticsIfRunning(tc, p, fuseMaxWait, fuseQuiet)
+		diags, ok := ce.diags(ctx, p)
 		if !ok {
 			continue // no live server for this file → zero added latency
 		}
@@ -292,6 +337,28 @@ func (ce *codingEfficiency) fuse(tc adk.ToolContext, sid, cwd, name string, args
 	out := copyMap(result)
 	out[field] = b.String()
 	return out
+}
+
+// shellWritePaths lists the paths of a Bash call's recorded writes.
+func shellWritePaths(ws []fstools.ShellWrite) []string {
+	out := make([]string, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, w.Path)
+	}
+	return out
+}
+
+// callIDOf is tc.FunctionCallID(), "" when tc is nil or cannot give one.
+func callIDOf(tc adk.ToolContext) (id string) {
+	if tc == nil {
+		return ""
+	}
+	defer func() {
+		if recover() != nil {
+			id = ""
+		}
+	}()
+	return tc.FunctionCallID()
 }
 
 // diagDelta compares the current diagnostics for path against the previous set

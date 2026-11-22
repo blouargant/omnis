@@ -143,6 +143,11 @@ context use (with **Compress now**), loaded skills, MCP connectors, files the
 agent created (with a download button), git changes, the agent's **background
 tasks** (running ones with their time and a stop button, finished ones under
 "Finished"; click one to see its output), and the file browser.
+
+The files the agent created include the ones it wrote with a shell command (a
+heredoc, `sed -i`, `pandoc -o`, a Python one-liner), not only those written with
+its file tools; logs, temporary and build files are left out.
+
 ## File preview
 
 A file the conversation produced can be shown in the right-hand column, next

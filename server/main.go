@@ -282,6 +282,12 @@ func run() error {
 	fstools.SetCwdResolver(func(sessionID string) string { return bashCwd.get(sessionID) })
 	defer fstools.SetCwdResolver(nil)
 
+	// Track the files a Bash call writes (a heredoc, sed -i, pandoc -o …) so
+	// streamEvents can send file_changed and record new files as produced, as
+	// for Write/Edit. Server-only: CLI/TUI/tests leave it off.
+	fstools.EnableShellWriteTracking(true)
+	defer fstools.EnableShellWriteTracking(false)
+
 	// Durably record a session's working directory whenever it changes (folder
 	// navigation, "!cd", "Open Chat here", fork). Persisting it lets a session —
 	// and any fork of it — resume in the same environment after a restart rather

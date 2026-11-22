@@ -34,6 +34,39 @@ func producedByWrite(tool string, resp map[string]any) bool {
 	return strings.HasPrefix(res, "wrote ")
 }
 
+// shellNoiseExts are the extensions of files a shell command writes that are
+// not results (logs, temp, lock and build files).
+var shellNoiseExts = map[string]bool{
+	".log": true, ".out": true, ".err": true, ".tmp": true, ".pid": true, ".lock": true,
+	".bak": true, ".swp": true, ".pyc": true, ".o": true,
+}
+
+// shellNoiseDirs are path components whose files are never results.
+var shellNoiseDirs = map[string]bool{
+	"node_modules": true, "__pycache__": true, "target": true, "dist": true, "build": true,
+}
+
+// shellProducedWorthy reports whether a file a shell command created belongs
+// in the session's produced files: it has an extension that is not a log,
+// temp or build artefact, and no hidden or build-output path component. Files
+// under /tmp pass when they qualify (reports are often written there).
+func shellProducedWorthy(path string) bool {
+	clean := filepath.Clean(path)
+	ext := strings.ToLower(filepath.Ext(clean))
+	if ext == "" || shellNoiseExts[ext] {
+		return false
+	}
+	for _, part := range strings.Split(clean, string(filepath.Separator)) {
+		if part == "" {
+			continue
+		}
+		if strings.HasPrefix(part, ".") || shellNoiseDirs[part] {
+			return false
+		}
+	}
+	return true
+}
+
 // recordProducedFile persists a file the agent created and notifies browsers.
 func recordProducedFile(sessionID, path string) {
 	if sessionID == "" || path == "" {

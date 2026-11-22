@@ -57,7 +57,9 @@ func NewReadOnlyBash() tool.Tool {
 			in.Cwd = sessionCwd(ctx)
 			in.Env = ShellEnvFrom(ctx)
 			in.ReadOnly = true
+			finish := trackBashWrites(ctx, in.Command, in.Cwd)
 			out, st, _ := runBashStatus(context.Background(), in)
+			finish()
 			notifyBashExit(ctx, st)
 			return BashOut{Output: out}, nil
 		})
