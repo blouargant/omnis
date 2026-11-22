@@ -26,10 +26,46 @@ func ShellWriteTargets(command, cwd string) []string {
 	if strings.TrimSpace(command) == "" {
 		return nil
 	}
+	c := &targetCollector{seen: map[string]bool{}}
+	collectShellTargets(command, cwd, 0, c)
+	if len(c.out) == 0 {
+		return nil
+	}
+	return c.out
+}
+
+// maxShellDepth bounds how many nested `sh -c '…'` bodies are parsed.
+const maxShellDepth = 2
+
+// shellNames are the shells whose -c argument is parsed as a command.
+var shellNames = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true}
+
+// collectShellTargets adds the candidates of command, run in cwd, to c.
+func collectShellTargets(command, cwd string, depth int, c *targetCollector) {
 	// Heredoc bodies are data, never shell syntax: cut them off first.
 	shell, bodies := splitHeredocs(command)
-	c := &targetCollector{seen: map[string]bool{}}
-	dir := cwd
+	// dirs is the directory stack: a subshell '(' pushes, ')' pops, a cd
+	// changes the top. prev is the directory `cd -` returns to.
+	dirs := []string{cwd}
+	prev := ""
+	push := func(n int) {
+		for ; n > 0; n-- {
+			dirs = append(dirs, dirs[len(dirs)-1])
+		}
+	}
+	pop := func(n int) {
+		for ; n > 0 && len(dirs) > 1; n-- {
+			dirs = dirs[:len(dirs)-1]
+		}
+	}
+	// dirAfter is the directory once n closing parens are passed.
+	dirAfter := func(n int) string {
+		k := len(dirs) - 1 - n
+		if k < 0 {
+			k = 0
+		}
+		return dirs[k]
+	}
 	segs := splitWithOps(shell)
 	bodyIdx := 0
 	for _, sg := range segs {
@@ -48,36 +84,64 @@ func ShellWriteTargets(command, cwd string) []string {
 			}
 			bodyIdx += lx.heredocs
 		}
+		push(lx.leadOpens)
+		dir := dirs[len(dirs)-1]
 		words := lx.words
 		// A cd changes the directory of what follows, unless it runs in a
-		// pipeline, a subshell or the background.
+		// pipeline or the background.
 		inPipe := sg.before == "|" || sg.before == "|&" || sg.after == "|" || sg.after == "|&" || sg.after == "&"
-		if len(words) > 0 && words[0].val == "cd" && len(lx.redirects) == 0 {
-			if !inPipe && !lx.subshell {
-				dir = cdTarget(words[1:], dir)
+		if len(words) > 0 && words[0].val == "cd" && !inPipe {
+			next := cdTarget(words[1:], dir, prev)
+			if next != dir {
+				prev = dir
 			}
-			continue
+			dirs[len(dirs)-1] = next
+			dir = next
 		}
-		for _, w := range lx.redirects {
-			c.add(resolveWord(w, dir))
+		for _, r := range lx.redirects {
+			d := dir
+			if r.closes > 0 {
+				d = dirAfter(r.closes)
+			}
+			c.add(resolveWord(r.word, d))
 		}
 		words = skipWrappers(words)
-		if len(words) == 0 {
-			continue
-		}
-		for _, p := range commandTargets(words, dir) {
-			c.add(p)
-		}
-		if pythonName.MatchString(filepath.Base(words[0].val)) {
-			for _, p := range pythonTargets(words[1:], segBodies, dir) {
+		if len(words) > 0 && words[0].val != "cd" {
+			for _, p := range commandTargets(words, dir) {
 				c.add(p)
 			}
+			base := filepath.Base(words[0].val)
+			if pythonName.MatchString(base) {
+				for _, p := range pythonTargets(words[1:], segBodies, dir) {
+					c.add(p)
+				}
+			}
+			if shellNames[base] && depth < maxShellDepth {
+				if code, ok := shellCode(words[1:]); ok {
+					collectShellTargets(code, dir, depth+1, c)
+				}
+			}
+		}
+		if lx.netParens > 0 {
+			push(lx.netParens)
+		} else {
+			pop(-lx.netParens)
 		}
 	}
-	if len(c.out) == 0 {
-		return nil
+}
+
+// shellCode returns the command string of `sh -c CODE` (also -lc, -ec …).
+func shellCode(args []shellWord) (string, bool) {
+	for i, a := range args {
+		v := a.val
+		if !strings.HasPrefix(v, "-") || strings.HasPrefix(v, "--") {
+			return "", false // the script or its operands: no -c
+		}
+		if strings.ContainsRune(v[1:], 'c') && i+1 < len(args) {
+			return args[i+1].val, true
+		}
 	}
-	return c.out
+	return "", false
 }
 
 type targetCollector struct {
@@ -154,9 +218,18 @@ type shellWord struct {
 // lexedSegment is a segment cut into command words and redirection targets.
 type lexedSegment struct {
 	words     []shellWord
-	redirects []shellWord // output redirection targets
-	heredocs  int         // number of << operators (heredoc starts)
-	subshell  bool        // the segment opens with '('
+	redirects []redirect // output redirection targets
+	heredocs  int        // number of << operators (heredoc starts)
+	leadOpens int        // '(' before the first word (subshells this segment opens)
+	netParens int        // '(' minus ')' after the leading ones
+}
+
+// redirect is an output redirection target and the number of ')' (net of
+// '(') that precede it in its segment after the leading ones: the target
+// resolves in the directory outside those subshells.
+type redirect struct {
+	word   shellWord
+	closes int
 }
 
 // lexSegment tokenises one subcommand. Output redirection targets go to
@@ -177,11 +250,15 @@ func lexSegment(seg string) lexedSegment {
 		}
 		ch := seg[i]
 		if ch == '(' || ch == ')' {
-			if ch == '(' && first {
-				lx.subshell = true
+			switch {
+			case ch == '(' && first:
+				lx.leadOpens++
+			case ch == '(':
+				lx.netParens++
+			default:
+				lx.netParens--
 			}
 			i++
-			first = false
 			continue
 		}
 		// Redirection operator: optional fd digits, then < or >; or &>.
@@ -240,7 +317,11 @@ func lexSegment(seg string) lexedSegment {
 			if dup && (w.raw == "-" || fdNumber.MatchString(w.raw)) {
 				continue
 			}
-			lx.redirects = append(lx.redirects, w)
+			closes := 0
+			if lx.netParens < 0 {
+				closes = -lx.netParens
+			}
+			lx.redirects = append(lx.redirects, redirect{word: w, closes: closes})
 			continue
 		}
 		w, k := readWord(seg, i)
@@ -372,7 +453,7 @@ func isAssignment(w string) bool {
 }
 
 // cdTarget is the directory after `cd ARGS` run in dir; "" when unknown.
-func cdTarget(args []shellWord, dir string) string {
+func cdTarget(args []shellWord, dir, prev string) string {
 	var ops []shellWord
 	for _, a := range args {
 		if strings.HasPrefix(a.val, "-") && a.val != "-" {
@@ -388,7 +469,7 @@ func cdTarget(args []shellWord, dir string) string {
 		return home
 	}
 	if ops[0].val == "-" {
-		return ""
+		return prev
 	}
 	return resolveRaw(ops[0], dir, true)
 }
@@ -781,24 +862,21 @@ func splitHeredocs(cmd string) (string, []string) {
 				i++
 			}
 		case strings.HasPrefix(cmd[i:], "(("):
-			// Arithmetic ((…)) or $((…)): copied with < and > blanked, so
-			// a shift is neither a heredoc nor a redirect.
+			// Arithmetic ((…)) or $((…)) is replaced by a number, so a shift
+			// is neither a heredoc nor a redirect, and its ';' and parens
+			// neither split the command nor open a subshell.
 			depth := 0
 			for ; i < n; i++ {
-				c := cmd[i]
-				switch c {
-				case '(':
+				if cmd[i] == '(' {
 					depth++
-				case ')':
+				} else if cmd[i] == ')' {
 					depth--
-				case '<', '>':
-					c = ' '
-				}
-				out.WriteByte(c)
-				if depth == 0 {
-					break
+					if depth == 0 {
+						break
+					}
 				}
 			}
+			out.WriteString(" 0 ")
 		case strings.HasPrefix(cmd[i:], "<<<"):
 			out.WriteString("<<<")
 			i += 2
