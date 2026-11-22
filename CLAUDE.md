@@ -1546,11 +1546,18 @@ the 2026-11-07 Harbor traces one edit in three went through the shell. Spec:
   heredoc body: `open('P','w'|'a'|'x')`, `Path('P').write_text/write_bytes`, and
   the same through a variable assigned a literal earlier). Heredoc bodies are cut
   off first (`splitHeredocs`, own quote scanner, which also drops `#` comments
-  and blanks `<`/`>` inside `((…))`/`$((…))`, so a shift is not a heredoc) so
-  their text is never read as shell; `>|` is a redirect, not a pipe; segments come from `splitWithOps` (the `unquotedMask` split keeping the
-  operators, so a `cd` in a pipeline/background/subshell is ignored) and a
-  `cd DIR` changes the directory of what follows (unresolvable ⇒ relative
-  candidates dropped). A word with `$`, a backtick or a glob is dropped, `~/`
+  and replaces each `((…))`/`$((…))` by ` 0 `, so a shift is not a heredoc and
+  its `;` and parens neither split nor open a subshell) so their text is never
+  read as shell; `>|` is a redirect, not a pipe. Segments come from
+  `splitWithOps` (the `unquotedMask` split keeping the operators, so a `cd` in a
+  pipeline or the background is ignored). A `cd DIR` changes the directory of
+  what follows (unresolvable ⇒ relative candidates dropped; `cd -` returns to the
+  previous one, unknown at the start); directories are a **stack**: a `(` pushes,
+  `)` pops, so `(cd sub && make > out.txt)` gives `sub/out.txt` and what follows
+  the `)` is back in the outer directory (`lexSegment` reports leading `(`, net
+  parens, and for each redirect the `)` before it). The `-c` body of
+  `sh`/`bash`/`zsh`/`dash`/`ksh` (also `-lc`, `-ec`) is parsed recursively in the
+  same directory, up to `maxShellDepth` = 2 levels. A word with `$`, a backtick or a glob is dropped, `~/`
   expands, `/dev/…` and `/proc/…` are dropped; ≤ 16 candidates, absolute, deduped.
   Python code is scanned with `strings.Index` + an anchored regexp on a 512-byte
   window (≤ 256 matches): whole-code regexps took 176 ms on a 1 MB body.
@@ -1563,13 +1570,16 @@ the 2026-11-07 Harbor traces one edit in three went through the shell. Spec:
   tool, not in the SSE consumer, which reads events from a buffered channel and
   could stat after a fast command already wrote. Stored under the **call id**
   (`RecordShellWrites` / `ShellWrites` non-destructive / `TakeShellWrites`;
-  1024 entries, 10 min). The model-visible result is unchanged.
+  1024 entries, 10 min: expired entries are swept every 64 records or when
+  full, then the oldest by record order is dropped). The model-visible result is
+  unchanged.
 - **Off unless the server enables it** — `EnableShellWriteTracking(true)` in
   [server/main.go](server/main.go). Off (CLI, TUI, tests) ⇒ no parse, no stat, and
   the handler does not even ask the context for its call id (`trackBashWrites`
   reads `FunctionCallID()` only when on and recovers a panic: test mocks panic on
   it). A panic in parse/stat is recovered and logged; the command runs normally.
-- **Server** — `emitShellWrites` in `streamEvents` ([server/sse.go](server/sse.go)),
+- **Server** — `applyShellWrites` ([server/produced_files.go](server/produced_files.go)),
+  called by `emitShellWrites` in `streamEvents` ([server/sse.go](server/sse.go)),
   beside `emitFileChanged` on both the root `tool_result` and the sub-agent
   `agent_tool_result` paths, takes the entry of a `Bash` result: `file_changed`
   with `tool: "write"` for a created file passing `shellProducedWorthy`, else
@@ -1579,10 +1589,16 @@ the 2026-11-07 Harbor traces one edit in three went through the shell. Spec:
   ([server/produced_files.go](server/produced_files.go)): an extension that is not
   `.log .out .err .tmp .pid .lock .bak .swp .pyc .o`, no hidden component, nothing
   under `node_modules`/`__pycache__`/`target`/`dist`/`build`; `/tmp` files pass.
+  **Injected turns** (scheduled routine, spawned task, mailbox, background
+  notification) call it too, through `injectedShellWrites` in `injectTurnRouted`'s
+  event loop ([server/mailbox_push.go](server/mailbox_push.go)): no `file_changed`
+  (those turns have no per-turn stream), but a report they write with the shell
+  lands in Results and running language servers are told. Root agent only: a
+  sub-agent's `Bash` writes in an injected turn are not taken and expire.
 - **Not covered**: indirect writes (`python build.py`, `make`, formatters),
   `patch`/`git apply`, `revert` snapshots and the per-file lock for shell writes,
-  `bash_background`/`monitor`/the `!` escape/the terminal dock, and injected turns
-  (they emit no SSE tool frames).
+  `bash_background`/`monitor`/the `!` escape/the terminal dock, here-strings, and
+  a sub-agent's `Bash` writes in an injected turn.
 
 ### Coding squad (token-efficient code intelligence)
 

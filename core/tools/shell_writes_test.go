@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/blouargant/omnis/core/adk"
 )
@@ -175,3 +176,27 @@ func TestTrackBashWritesRecoversFromCallIDPanic(t *testing.T) {
 type panickyCallID struct{ adk.ToolContext }
 
 func (panickyCallID) FunctionCallID() string { panic("not implemented") }
+
+// Expired entries are swept on later records, not only when read.
+func TestShellWritesStoreSweepsExpired(t *testing.T) {
+	enableTracking(t)
+	now := time.Now()
+	shellWriteNow = func() time.Time { return now }
+	t.Cleanup(func() { shellWriteNow = time.Now })
+	base := shellWriteCount()
+	for i := 0; i < 10; i++ {
+		RecordShellWrites(fmt.Sprintf("sw-exp-%d", i), []ShellWrite{{Path: "/x"}})
+	}
+	now = now.Add(11 * time.Minute)
+	for i := 0; i < shellWriteSweepEvery; i++ {
+		RecordShellWrites(fmt.Sprintf("sw-new-%d", i), []ShellWrite{{Path: "/x"}})
+	}
+	if n := shellWriteCount(); n > base+shellWriteSweepEvery {
+		t.Fatalf("%d entries: expired ones were not swept", n)
+	}
+	for i := 0; i < 10; i++ {
+		if ShellWrites(fmt.Sprintf("sw-exp-%d", i)) != nil {
+			t.Fatal("expired entry still readable")
+		}
+	}
+}

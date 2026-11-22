@@ -35,6 +35,9 @@ TokenEconomizer's `loopguard/shell_edits.py` (Microsoft Research, arXiv
   not covered.
 - Injected turns (mailbox, scheduled, spawned, background) emit no SSE tool
   frames today and stay as they are.
+  *Amended after the first version (user, 2026-11-22):* a file the root agent of
+  an injected turn writes with the shell is recorded in Results (still no
+  `file_changed`, as those turns have no stream).
 - No change to what the model can do, and no new permission rule.
 
 ## Anti-goals

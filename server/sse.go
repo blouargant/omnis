@@ -917,24 +917,9 @@ func streamEvents(
 	// that is not noise reads as a "write" (download card, produced file),
 	// any other as an "edit"; both refresh the editor and the Files panel.
 	emitShellWrites := func(toolName, callID string) {
-		if toolName != "Bash" {
-			return
-		}
-		for _, w := range fstools.TakeShellWrites(callID) {
-			// "write" makes the web UI offer a download card, so it is kept
-			// for a new file that is also a result: a new log or temp file
-			// only refreshes the editor and the Files panel.
-			produced := w.Created && shellProducedWorthy(w.Path)
-			tool := "edit"
-			if produced {
-				tool = "write"
-			}
-			emit("file_changed", map[string]any{"path": w.Path, "tool": tool})
-			if produced {
-				recordProducedFile(ownSession, w.Path)
-			}
-			toolkitagent.FireFileChange(w.Path)
-		}
+		applyShellWrites(ownSession, toolName, callID, func(path, tool string) {
+			emit("file_changed", map[string]any{"path": path, "tool": tool})
+		})
 	}
 
 	// Convert the rangefunc ADK iterator to a channel so we can select on it

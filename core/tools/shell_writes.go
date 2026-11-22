@@ -28,12 +28,20 @@ var shellWriteTracking atomic.Bool
 type shellWriteEntry struct {
 	writes []ShellWrite
 	at     time.Time
+	seq    int // record order, oldest lowest
 }
+
+// shellWriteSweepEvery: expired entries are swept once every this many
+// records (and whenever the store is full).
+const shellWriteSweepEvery = 64
+
+// shellWriteNow is the store's clock (tests replace it).
+var shellWriteNow = time.Now
 
 var shellWriteStore = struct {
 	sync.Mutex
-	m     map[string]shellWriteEntry
-	order []string // call ids, oldest first (may hold ids already taken)
+	m       map[string]shellWriteEntry
+	records int
 }{m: map[string]shellWriteEntry{}}
 
 // EnableShellWriteTracking turns the Bash tool's write tracking on or off. It
@@ -47,29 +55,30 @@ func RecordShellWrites(callID string, ws []ShellWrite) {
 	if !shellWriteTracking.Load() || callID == "" || len(ws) == 0 {
 		return
 	}
-	now := time.Now()
+	now := shellWriteNow()
 	s := &shellWriteStore
 	s.Lock()
 	defer s.Unlock()
-	if _, ok := s.m[callID]; !ok {
-		s.order = append(s.order, callID)
-	}
-	s.m[callID] = shellWriteEntry{writes: append([]ShellWrite(nil), ws...), at: now}
-	// Drop expired entries and the oldest beyond the cap.
-	drop := 0
-	for drop < len(s.order) {
-		id := s.order[drop]
-		e, ok := s.m[id]
-		if ok && now.Sub(e.at) < shellWriteTTL && len(s.m) <= shellWriteMaxEntries {
-			break
+	s.records++
+	s.m[callID] = shellWriteEntry{writes: append([]ShellWrite(nil), ws...), at: now, seq: s.records}
+	full := len(s.m) > shellWriteMaxEntries
+	if full || s.records%shellWriteSweepEvery == 0 {
+		for id, e := range s.m {
+			if now.Sub(e.at) >= shellWriteTTL {
+				delete(s.m, id)
+			}
 		}
-		if ok {
-			delete(s.m, id)
-		}
-		drop++
 	}
-	if drop > 0 {
-		s.order = append([]string(nil), s.order[drop:]...)
+	// Still over the cap: drop the oldest (one scan per record, at most
+	// shellWriteMaxEntries entries).
+	for len(s.m) > shellWriteMaxEntries {
+		oldest, seq := "", 0
+		for id, e := range s.m {
+			if oldest == "" || e.seq < seq {
+				oldest, seq = id, e.seq
+			}
+		}
+		delete(s.m, oldest)
 	}
 }
 
@@ -94,7 +103,7 @@ func readShellWrites(callID string, take bool) []ShellWrite {
 	if !ok {
 		return nil
 	}
-	if time.Since(e.at) >= shellWriteTTL {
+	if shellWriteNow().Sub(e.at) >= shellWriteTTL {
 		delete(s.m, callID)
 		return nil
 	}

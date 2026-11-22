@@ -722,6 +722,7 @@ func (pm *pushManager) injectTurnOpts(ctx context.Context, d serverDeps, session
 				if p.FunctionResponse != nil {
 					recordSkillLoad(sessionID, rootAgent, p.FunctionResponse.Name, p.FunctionResponse.Response)
 					memCalls.result(p.FunctionResponse)
+					injectedShellWrites(sessionID, p.FunctionResponse)
 				}
 				// A mailbox send by the answering squad disarms the backstop.
 				if p.FunctionCall != nil {

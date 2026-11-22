@@ -198,3 +198,32 @@ func TestShellWriteTargetsReviewFixes(t *testing.T) {
 		}
 	}
 }
+
+func TestShellWriteTargetsSubshellAndShC(t *testing.T) {
+	cases := []struct {
+		cmd  string
+		want []string
+	}{
+		// A cd inside a subshell applies to the subshell only.
+		{"(cd sub && make > out.txt)", []string{"/work/sub/out.txt"}},
+		{"(cd sub; echo a > in.txt); echo b > back.txt", []string{"/work/sub/in.txt", "/work/back.txt"}},
+		{"(cd sub; echo a) > outer.txt", []string{"/work/outer.txt"}},
+		{"cd /app && (cd deep && echo x > a.txt) && echo y > b.txt", []string{"/app/deep/a.txt", "/app/b.txt"}},
+		{"echo $(cd /x; pwd) > p.txt", []string{"/work/p.txt"}},
+		{"for ((i=0;i<3;i++)); do echo $i; done > loop.txt", []string{"/work/loop.txt"}},
+		// sh -c / bash -lc bodies are parsed too.
+		{"timeout 30 sh -c 'echo x > inner.txt'", []string{"/work/inner.txt"}},
+		{"bash -lc \"cd /srv && sed -i 's/a/b/' conf.ini\"", []string{"/srv/conf.ini"}},
+		{"sh -c 'sh -c \"sh -c \\\"echo > deep.txt\\\"\"'", nil},
+		{"cd /app && bash -c 'echo > a.txt'", []string{"/app/a.txt"}},
+		// cd - returns to the previous directory.
+		{"cd /a && cd /b && cd - && echo > c.txt", []string{"/a/c.txt"}},
+		{"cd - && echo > d.txt", nil},
+	}
+	for _, c := range cases {
+		got := ShellWriteTargets(c.cmd, "/work")
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("ShellWriteTargets(%q) = %#v, want %#v", c.cmd, got, c.want)
+		}
+	}
+}
