@@ -22,7 +22,9 @@ func New() []tool.Tool {
 			func(ctx adk.ToolContext, in BashIn) (BashOut, error) {
 				in.Cwd = sessionCwd(ctx)
 				in.Env = ShellEnvFrom(ctx)
+				finish := trackBashWrites(ctx, in.Command, in.Cwd)
 				out, st, _ := runBashStatus(context.Background(), in)
+				finish()
 				notifyBashExit(ctx, st)
 				return BashOut{Output: out}, nil
 			}),
