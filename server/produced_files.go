@@ -9,6 +9,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"google.golang.org/genai"
+
+	toolkitagent "github.com/blouargant/omnis/agent"
+	fstools "github.com/blouargant/omnis/core/tools"
 
 	"github.com/blouargant/omnis/internal/sessions"
 )
@@ -65,6 +69,46 @@ func shellProducedWorthy(path string) bool {
 		}
 	}
 	return true
+}
+
+// applyShellWrites handles the files a Bash call wrote (stored by the Bash
+// tool under its call id; see core/tools/shell_writes.go): it takes the entry,
+// tells emit about each file (nil when the turn has no stream), records a new
+// file that is a result as produced, and tells running language servers. A
+// new file that is a result is announced as a "write" — the web UI offers a
+// download card for it; anything else (a modified file, a new log or temp
+// file) as an "edit", which only refreshes the editor and the Files panel.
+// A no-op for any other tool.
+func applyShellWrites(sessionID, toolName, callID string, emit func(path, tool string)) {
+	if toolName != "Bash" || callID == "" {
+		return
+	}
+	for _, w := range fstools.TakeShellWrites(callID) {
+		produced := w.Created && shellProducedWorthy(w.Path)
+		tool := "edit"
+		if produced {
+			tool = "write"
+		}
+		if emit != nil {
+			emit(w.Path, tool)
+		}
+		if produced {
+			recordProducedFile(sessionID, w.Path)
+		}
+		toolkitagent.FireFileChange(w.Path)
+	}
+}
+
+// injectedShellWrites is applyShellWrites for an injected turn (scheduled
+// routine, spawned task, mailbox, background notification): those turns emit
+// no SSE tool frames, so there is no file_changed, but a report the turn
+// wrote with the shell still lands in Results. Root agent only: a sub-agent's
+// Bash calls of an injected turn are not seen (their entries expire).
+func injectedShellWrites(sessionID string, fr *genai.FunctionResponse) {
+	if fr == nil {
+		return
+	}
+	applyShellWrites(sessionID, fr.Name, fr.ID, nil)
 }
 
 // recordProducedFile persists a file the agent created and notifies browsers.

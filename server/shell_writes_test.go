@@ -188,3 +188,33 @@ func TestStreamNewNoiseFileIsNotOfferedAsDownload(t *testing.T) {
 		t.Fatalf("produced = %+v, want none", got)
 	}
 }
+
+// Injected turns (scheduled routine, spawned task, mailbox) emit no SSE tool
+// frames, but a file their Bash call created is still recorded as produced and
+// the entry is taken.
+func TestInjectedTurnShellWrites(t *testing.T) {
+	report, old := setupShellWrites(t, "sw-inj")
+	logFile := filepath.Join(filepath.Dir(report), "run.log")
+	if err := os.WriteFile(logFile, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fstools.RecordShellWrites("sw-inj", []fstools.ShellWrite{{Path: report, Created: true}, {Path: old}, {Path: logFile, Created: true}})
+	injectedShellWrites("sw-inj-sess", &genai.FunctionResponse{ID: "sw-inj", Name: "Bash"})
+	got, err := sessions.LoadProducedFiles("sw-inj-sess")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Path != report {
+		t.Fatalf("produced = %+v, want only %s", got, report)
+	}
+	if ws := fstools.TakeShellWrites("sw-inj"); ws != nil {
+		t.Fatalf("entry not taken: %v", ws)
+	}
+	// Another tool's response leaves a stored entry alone.
+	fstools.RecordShellWrites("sw-inj2", []fstools.ShellWrite{{Path: report, Created: true}})
+	injectedShellWrites("sw-inj-sess", &genai.FunctionResponse{ID: "sw-inj2", Name: "Grep"})
+	injectedShellWrites("sw-inj-sess", nil)
+	if fstools.ShellWrites("sw-inj2") == nil {
+		t.Fatal("a non-Bash response took the entry")
+	}
+}
