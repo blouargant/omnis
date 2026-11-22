@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestShellWriteTargetsForms(t *testing.T) {
@@ -105,5 +106,70 @@ func TestShellWriteTargetsEmptyCwd(t *testing.T) {
 	want := []string{"/abs/a.txt"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestShellWriteTargetsHeredocBodyIsNotShell(t *testing.T) {
+	cmd := "cat > notes.md <<'EOF'\nuse `echo x > secret.txt` or sed -i file\nEOF"
+	got := ShellWriteTargets(cmd, "/work")
+	want := []string{"/work/notes.md"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	// A body with an unbalanced quote must not swallow what follows.
+	cmd = "cat > a.md <<EOF\nit's > b.md\nEOF\necho x > c.md"
+	got = ShellWriteTargets(cmd, "/work")
+	want = []string{"/work/a.md", "/work/c.md"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	// <<- strips leading tabs from the terminator.
+	cmd = "cat > d.md <<-END\n\techo x > e.md\n\tEND\necho y > f.md"
+	got = ShellWriteTargets(cmd, "/work")
+	want = []string{"/work/d.md", "/work/f.md"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestShellWriteTargetsPython(t *testing.T) {
+	cases := []struct {
+		cmd  string
+		want []string
+	}{
+		{"python3 - <<'PY'\nopen('out.json','w').write('{}')\nPY", []string{"/work/out.json"}},
+		{"python3 -c \"open('a.txt','a').write('x')\"", []string{"/work/a.txt"}},
+		{"python3 - <<'PY'\np='test/core/x.spec.ts'\ns=open(p).read()\nopen(p,'w').write(s)\nPY", []string{"/work/test/core/x.spec.ts"}},
+		{"python - <<'PY'\nfrom pathlib import Path\nPath('r.md').write_text('x')\nPY", []string{"/work/r.md"}},
+		{"python3 - <<'PY'\nprint(open('in.txt').read())\nPY", nil},
+		{"cd /app && python3 - <<'PY'\nopen('a.py','w').write('')\nPY", []string{"/app/a.py"}},
+		{"node -e \"require('fs')\" <<'JS'\nopen('x','w')\nJS", nil},
+		{"python3.12 - <<'PY'\nwith open(\"/tmp/r.csv\", mode=\"w\") as f:\n    f.write('x')\nPY", []string{"/tmp/r.csv"}},
+		{"cat > a.txt <<EOF\nx\nEOF\npython3 - <<'PY'\nopen('b.txt','x')\nPY", []string{"/work/a.txt", "/work/b.txt"}},
+	}
+	for _, c := range cases {
+		got := ShellWriteTargets(c.cmd, "/work")
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("ShellWriteTargets(%q) = %#v, want %#v", c.cmd, got, c.want)
+		}
+	}
+}
+
+func TestShellWriteTargetsLargeCommand(t *testing.T) {
+	body := strings.Repeat("line with > and 'quote and sed -i x and open('f','w')\n", 1<<20/56)
+	cmd := "cat > big.md <<'EOF'\n" + body + "EOF"
+	start := time.Now()
+	got := ShellWriteTargets(cmd, "/work")
+	if d := time.Since(start); d > 500*time.Millisecond {
+		t.Fatalf("took %v", d)
+	}
+	if !reflect.DeepEqual(got, []string{"/work/big.md"}) {
+		t.Fatalf("got %v", got)
+	}
+	pcmd := "python3 - <<'PY'\n" + body + "PY"
+	start = time.Now()
+	ShellWriteTargets(pcmd, "/work")
+	if d := time.Since(start); d > 500*time.Millisecond {
+		t.Fatalf("python took %v", d)
 	}
 }

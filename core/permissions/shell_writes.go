@@ -3,6 +3,8 @@ package permissions
 import (
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -24,15 +26,28 @@ func ShellWriteTargets(command, cwd string) []string {
 	if strings.TrimSpace(command) == "" {
 		return nil
 	}
-	shell := command
+	// Heredoc bodies are data, never shell syntax: cut them off first.
+	shell, bodies := splitHeredocs(command)
 	c := &targetCollector{seen: map[string]bool{}}
 	dir := cwd
 	segs := splitWithOps(shell)
+	bodyIdx := 0
 	for _, sg := range segs {
 		if c.full() {
 			break
 		}
 		lx := lexSegment(sg.text)
+		var segBodies []string
+		if lx.heredocs > 0 {
+			end := bodyIdx + lx.heredocs
+			if end > len(bodies) {
+				end = len(bodies)
+			}
+			if bodyIdx < end {
+				segBodies = bodies[bodyIdx:end]
+			}
+			bodyIdx += lx.heredocs
+		}
 		words := lx.words
 		// A cd changes the directory of what follows, unless it runs in a
 		// pipeline, a subshell or the background.
@@ -52,6 +67,11 @@ func ShellWriteTargets(command, cwd string) []string {
 		}
 		for _, p := range commandTargets(words, dir) {
 			c.add(p)
+		}
+		if pythonName.MatchString(filepath.Base(words[0].val)) {
+			for _, p := range pythonTargets(words[1:], segBodies, dir) {
+				c.add(p)
+			}
 		}
 	}
 	if len(c.out) == 0 {
@@ -702,4 +722,254 @@ func tarArchive(args []shellWord) []shellWord {
 		return nil
 	}
 	return archive
+}
+
+// heredocTag is a pending heredoc: its terminator and whether leading tabs
+// are stripped (<<-).
+type heredocTag struct {
+	name  string
+	strip bool
+}
+
+// splitHeredocs removes the body lines of each heredoc (<<TAG, <<'TAG',
+// <<"TAG", <<-TAG; not the <<< here-string) up to the line equal to TAG, and
+// returns the remaining shell text and the bodies in order. Only an unquoted
+// << starts a heredoc. An operator with no tag, or a body never terminated,
+// still yields one (possibly partial) body so the count matches the lexer's.
+func splitHeredocs(cmd string) (string, []string) {
+	if !strings.Contains(cmd, "<<") {
+		return cmd, nil
+	}
+	var out strings.Builder
+	var bodies []string
+	var pending []heredocTag
+	var quote byte
+	n := len(cmd)
+	for i := 0; i < n; i++ {
+		ch := cmd[i]
+		if quote == 0 && ch == '\\' && i+1 < n {
+			out.WriteByte(ch)
+			out.WriteByte(cmd[i+1])
+			i++
+			continue
+		}
+		if quote != 0 {
+			if ch == '\\' && quote == '"' && i+1 < n {
+				out.WriteByte(ch)
+				out.WriteByte(cmd[i+1])
+				i++
+				continue
+			}
+			if ch == quote {
+				quote = 0
+			}
+			out.WriteByte(ch)
+			continue
+		}
+		switch {
+		case ch == '\'' || ch == '"':
+			quote = ch
+			out.WriteByte(ch)
+		case strings.HasPrefix(cmd[i:], "<<<"):
+			out.WriteString("<<<")
+			i += 2
+		case strings.HasPrefix(cmd[i:], "<<"):
+			j := i + 2
+			strip := false
+			if j < n && cmd[j] == '-' {
+				strip = true
+				j++
+			}
+			w, k := readWord(cmd, j)
+			out.WriteString(cmd[i:k])
+			pending = append(pending, heredocTag{name: w.val, strip: strip})
+			i = k - 1
+		case ch == '\n' && len(pending) > 0:
+			out.WriteByte('\n')
+			pos := i + 1
+			for _, tg := range pending {
+				if tg.name == "" {
+					bodies = append(bodies, "")
+					continue
+				}
+				var body strings.Builder
+				for pos < n {
+					end := strings.IndexByte(cmd[pos:], '\n')
+					line := cmd[pos:]
+					next := n
+					if end >= 0 {
+						line = cmd[pos : pos+end]
+						next = pos + end + 1
+					}
+					cmp := line
+					if tg.strip {
+						cmp = strings.TrimLeft(cmp, "\t")
+					}
+					pos = next
+					if cmp == tg.name {
+						break
+					}
+					body.WriteString(line)
+					body.WriteByte('\n')
+				}
+				bodies = append(bodies, body.String())
+			}
+			pending = nil
+			i = pos - 1
+		default:
+			out.WriteByte(ch)
+		}
+	}
+	for range pending {
+		bodies = append(bodies, "")
+	}
+	return out.String(), bodies
+}
+
+// pythonName matches python, python3 and python3.N.
+var pythonName = regexp.MustCompile(`^python(3(\.[0-9]+)?)?$`)
+
+// pyMaxMatches bounds the regexp matches read from one piece of code, so a
+// very large script costs one linear scan, not one allocation per match.
+const pyMaxMatches = 256
+
+const pyStr = `(?:'([^'\n]*)'|"([^"\n]*)")`
+
+var (
+	pyOpenAt = regexp.MustCompile(`^open\(\s*(?:'([^'\n]*)'|"([^"\n]*)"|([A-Za-z_][A-Za-z0-9_]*))\s*,\s*(?:mode\s*=\s*)?` + pyStr)
+	pyPathAt = regexp.MustCompile(`^Path\(\s*(?:'([^'\n]*)'|"([^"\n]*)"|([A-Za-z_][A-Za-z0-9_]*))\s*\)\s*\.\s*write_(?:text|bytes)\s*\(`)
+)
+
+// pythonTargets scans the code of a python command (its -c argument and the
+// heredoc bodies of its segment) for files opened for writing:
+// open('P', 'w'|'a'|'x'…), Path('P').write_text/write_bytes, and the same
+// through a variable assigned a string literal earlier in the code.
+func pythonTargets(args []shellWord, bodies []string, dir string) []string {
+	var codes []string
+	for i := 0; i < len(args); i++ {
+		if args[i].val == "-c" && i+1 < len(args) {
+			codes = append(codes, args[i+1].val)
+			break
+		}
+		if strings.HasPrefix(args[i].val, "-c") && len(args[i].val) > 2 {
+			codes = append(codes, args[i].val[2:])
+			break
+		}
+	}
+	codes = append(codes, bodies...)
+	var out []string
+	for _, code := range codes {
+		out = append(out, pythonCodeTargets(code, dir)...)
+	}
+	return out
+}
+
+type pyHit struct {
+	pos  int
+	path string
+}
+
+// pyWindow is how far past "open(" / "Path(" a call is matched.
+const pyWindow = 512
+
+func isIdentByte(c byte) bool {
+	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+}
+
+// pythonCodeTargets finds the calls with strings.Index and matches each with
+// an anchored regexp on a short window, so a very large script costs a few
+// linear scans and at most pyMaxMatches regexp runs.
+func pythonCodeTargets(code, dir string) []string {
+	type assign struct {
+		pos int
+		val string
+	}
+	// Each variable's string assignments are found once, with one scan.
+	varCache := map[string][]assign{}
+	lookup := func(name string, pos int) (string, bool) {
+		as, seen := varCache[name]
+		if !seen {
+			re, err := regexp.Compile(`(?:^|[^A-Za-z0-9_.])` + regexp.QuoteMeta(name) + `\s*=\s*` + pyStr)
+			if err == nil {
+				for _, m := range re.FindAllStringSubmatchIndex(code, pyMaxMatches) {
+					if m[2] >= 0 {
+						as = append(as, assign{m[0], code[m[2]:m[3]]})
+					} else if m[4] >= 0 {
+						as = append(as, assign{m[0], code[m[4]:m[5]]})
+					}
+				}
+			}
+			varCache[name] = as
+		}
+		val, ok := "", false
+		for _, a := range as {
+			if a.pos >= pos {
+				break
+			}
+			val, ok = a.val, true
+		}
+		return val, ok
+	}
+	var hits []pyHit
+	budget := pyMaxMatches
+	scan := func(needle string, re *regexp.Regexp, accept func(w string, m []int) bool) {
+		from := 0
+		for budget > 0 {
+			k := strings.Index(code[from:], needle)
+			if k < 0 {
+				return
+			}
+			pos := from + k
+			from = pos + len(needle)
+			if pos > 0 && (isIdentByte(code[pos-1])) {
+				continue
+			}
+			budget--
+			end := pos + pyWindow
+			if end > len(code) {
+				end = len(code)
+			}
+			w := code[pos:end]
+			m := re.FindStringSubmatchIndex(w)
+			if m == nil || !accept(w, m) {
+				continue
+			}
+			g := func(k int) (string, bool) {
+				if m[2*k] < 0 {
+					return "", false
+				}
+				return w[m[2*k]:m[2*k+1]], true
+			}
+			var p string
+			ok := false
+			if v, has := g(1); has {
+				p, ok = v, true
+			} else if v, has := g(2); has {
+				p, ok = v, true
+			} else if v, has := g(3); has {
+				p, ok = lookup(v, pos)
+			}
+			if ok {
+				hits = append(hits, pyHit{pos, p})
+			}
+		}
+	}
+	scan("open(", pyOpenAt, func(w string, m []int) bool {
+		mode := ""
+		if m[8] >= 0 {
+			mode = w[m[8]:m[9]]
+		} else if m[10] >= 0 {
+			mode = w[m[10]:m[11]]
+		}
+		return strings.ContainsAny(mode, "wax")
+	})
+	scan("Path(", pyPathAt, func(string, []int) bool { return true })
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].pos < hits[j].pos })
+	var out []string
+	for _, h := range hits {
+		if p := resolveWord(shellWord{val: h.path, raw: h.path}, dir); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
