@@ -405,7 +405,10 @@ type RuntimeSettings struct {
 	// ConfigWarnings lists configuration problems that were worked around
 	// rather than failing the resolution (e.g. a squad dropped because its
 	// leader is no longer an enabled agent). Shown in Settings.
-	ConfigWarnings        []string
+	ConfigWarnings []string
+	// PromptOverrides replaces shared prompt texts by id (prompt_overrides.json,
+	// see prompt_overrides.go). Nil when no layer has the file.
+	PromptOverrides       map[string]string
 	ConfigPath            string
 	ModelsConfigPath      string
 	Providers             map[string]RuntimeProviderConfig
@@ -1626,6 +1629,7 @@ func ResolveRuntimeSettings(opts Options) (RuntimeSettings, error) {
 		log.Printf("config: %s", w)
 	}
 	out.ConfigWarnings = append(out.ConfigWarnings, squadWarnings...)
+	applyPromptOverrides(&out)
 	for i := range out.Squads {
 		out.Squads[i].Plugin = plugins.squadPlugin[out.Squads[i].Name]
 	}
