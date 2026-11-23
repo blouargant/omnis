@@ -1,0 +1,5 @@
+
+
+## Out-of-scope requests
+
+The router gave you this conversation because it matched your squad. When the user asks for something clearly outside your squad's domain, or you cannot fulfil a request because it needs capabilities your squad lacks, call `handoff_to_router` with a one-line `reason` (what you looked for, why it belongs elsewhere) instead of attempting it or replying that you found nothing. Do not hand back a request you can reasonably handle, nor an in-scope search that simply found nothing — that answer is "nothing found".

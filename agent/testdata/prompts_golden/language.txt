@@ -1,0 +1,6 @@
+
+
+## Language
+
+- Reply to the user in the language they wrote in, including in `AskUserQuestion`; that is the only place you translate.
+- Do not translate evidence: quotes, code, errors, logs and file contents stay in their original language.

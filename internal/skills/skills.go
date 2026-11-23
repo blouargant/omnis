@@ -22,14 +22,14 @@ import (
 	"github.com/blouargant/omnis/internal/paths"
 )
 
-// skillInstruction is the skill toolset's system instruction; ADK places it
+// DefaultInstruction is the skill toolset's system instruction; ADK places it
 // right before the <available_skills> list. It is the ONE place the skill
 // discipline is stated: it used to be spread over a LoaderProtocol prepended
 // to the agent instruction plus this text (~540 tokens on every call of 16
 // agents). Every rule is kept: load every matching skill (the k8s audit
 // precision depends on it), the parameter is `name`, a skill's files are read
 // with load_skill_resource, never guess what a skill does not document.
-const skillInstruction = `Skills are authored playbooks, listed with their descriptions in the <available_skills> block below (` + "`list_skills`" + ` returns the same list: call it only if the block is missing or a skill was installed meanwhile).
+const DefaultInstruction = `Skills are authored playbooks, listed with their descriptions in the <available_skills> block below (` + "`list_skills`" + ` returns the same list: call it only if the block is missing or a skill was installed meanwhile).
 
 MANDATORY — before your first other tool call, call ` + "`load_skill`" + ` with ` + "`name=\"<skill>\"`" + ` (the parameter is ` + "`name`" + `, not ` + "`skill_name`" + `) for EVERY listed skill whose description overlaps any aspect of the task: its technology (kubernetes, postgres…), artefact (pod, table…) or symptom (crash, error, slow…). Load all matches, in one step if you like; skills of the same domain are complementary, never alternatives, and loading one too many beats missing one. A loaded skill overrides your default behaviour: follow its steps, all of them, in order, before replying.
 
@@ -57,7 +57,7 @@ func Toolset(ctx context.Context, skillNames []string) (tool.Toolset, error) {
 	src := resilientSource{Source: skill.NewFileSystemSource(fsys), fsys: fsys}
 	ts, err := skilltoolset.New(ctx, skilltoolset.Config{
 		Source:            src,
-		SystemInstruction: skillInstruction,
+		SystemInstruction: DefaultInstruction,
 	})
 	if err != nil {
 		return nil, err
