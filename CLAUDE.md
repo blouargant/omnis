@@ -1937,14 +1937,21 @@ words stay the first part. Round-trips through the Settings GET/PUT allowlist
 `set_agent` yet.
 
 **Why:** the System leader's delegation rules, whatever their wording in the
-system instruction, did not reach `balanced` (0/20 unprompted delegation, no
-fan-out). With the shipped reminder on `leader` (investigator first, one call
-per independent question in the same response, one re-task then stop):
-unprompted delegation 0/5 → 5/5, fan-out 0/5 → 5/5 in parallel, calls on empty
-evidence 4-5 → 2-3; `premium` unchanged, 15/15
-(`omnis-benches/reports/leader-fake-2026-11.md`, fourth run). `balanced` still
-runs its own Bash alongside the delegation. Re-run that bench
-(`squad-bench/tasks-leader-fake.json`) before rewording it.
+system instruction, did not reach `balanced` (unprompted delegation 1/25, no
+fan-out). With the shipped reminder on `leader`: unprompted delegation 5/5,
+two independent questions = two parallel calls 5/5; `premium` unchanged
+(`omnis-benches/reports/leader-fake-2026-11.md`, fourth and fifth runs).
+
+**GOTCHA — the wording was benched on the real squad, keep both clauses.** A
+first wording ("goes to the investigator first… then stop and say what is
+unverified") made `premium` delegate every one-step lookup (3 s → 13-26 s) and
+`balanced` end 5 real turns of 36 on an empty reply. The shipped one leaves "a
+single quick lookup" to the leader and ends with "Always end with a written
+answer": 0 empty replies in 48 real runs, no lookup delegated. Known cost: a
+two-question task on a tiny directory takes ~30-45 s through two investigator
+calls instead of ~6 s. Not fixed: `balanced` still makes 2-4 calls on empty
+evidence. Re-run `tasks-leader-fake.json`, `tasks-leader-fake-direct.json` and
+`tasks-leader-real.json` (omnis-benches `squad-bench`) before rewording it.
 
 ### Deferred tools (`deferred_tools`) and the fixed prompt
 
