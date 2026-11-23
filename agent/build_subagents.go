@@ -269,6 +269,7 @@ func buildSubAgentsFromConfigs(
 			Model:                 agentLLM,
 			OnModelErrorCallbacks: []llmagent.OnModelErrorCallback{compressOnErr},
 			SubAgent:              true,
+			Contract:              usePrompt(runtime, "contract.subagent", cfg.Name, agentkit.SubAgentSystemPrompt),
 			Tools:                 subTools,
 			Toolsets:              subToolsets,
 			BeforeToolCallbacks:   beforeTool,

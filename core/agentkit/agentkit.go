@@ -124,6 +124,11 @@ type AgentConfig struct {
 	// output) on every message.
 	NoContract bool
 
+	// Contract, when non-empty, replaces SystemPrompt / SubAgentSystemPrompt
+	// (prompt_overrides.json contract.root / contract.subagent). Ignored with
+	// NoContract.
+	Contract string
+
 	// Optional per-agent callbacks. Use these to attach observers (e.g. an
 	// events bus) directly on the agent so they fire even when the agent is
 	// invoked outside the runner that owns the toolkit's plugin — most
@@ -151,6 +156,9 @@ func New(cfg AgentConfig) (agent.Agent, error) {
 	instr := SystemPrompt
 	if cfg.SubAgent {
 		instr = SubAgentSystemPrompt
+	}
+	if cfg.Contract != "" {
+		instr = cfg.Contract
 	}
 	if cfg.NoContract {
 		instr = cfg.Instruction

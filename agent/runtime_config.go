@@ -408,7 +408,10 @@ type RuntimeSettings struct {
 	ConfigWarnings []string
 	// PromptOverrides replaces shared prompt texts by id (prompt_overrides.json,
 	// see prompt_overrides.go). Nil when no layer has the file.
-	PromptOverrides       map[string]string
+	PromptOverrides map[string]string
+	// reach records which agents each prompt text reaches while a generation
+	// is built (BuildInstance sets it; nil elsewhere, where recording is a no-op).
+	reach                 *promptReach
 	ConfigPath            string
 	ModelsConfigPath      string
 	Providers             map[string]RuntimeProviderConfig

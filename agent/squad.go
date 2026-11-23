@@ -406,6 +406,13 @@ func buildSquadInstance(
 	leadTools = applyReadOnly(rootCfg, leadTools, capToolsets)
 	leadTools = applyDeferredTools(rootCfg.DeferredTools, leadTools)
 
+	// The operating contract (prompt_overrides.json contract.root). The router
+	// gets none (NoContract), so it is neither overridden nor recorded there.
+	var rootContract string
+	if !isRouter {
+		rootContract = usePrompt(runtime, "contract.root", rootCfg.Name, agentkit.SystemPrompt)
+	}
+
 	lead, err := agentkit.New(agentkit.AgentConfig{
 		Name:        rootCfg.Name,
 		Description: rootDescription,
@@ -415,6 +422,7 @@ func buildSquadInstance(
 		Instruction: rootInstruction,
 		// The router only routes; its text is withheld. See AgentConfig.NoContract.
 		NoContract: runtime.RouterSquad != "" && squad.Name == runtime.RouterSquad,
+		Contract:   rootContract,
 	})
 	if err != nil {
 		permGateClose()

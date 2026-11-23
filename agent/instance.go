@@ -57,6 +57,10 @@ type Instance struct {
 	LeaderCfg                  RuntimeAgentConfig
 	LeaderAllowFileAttachments bool
 
+	// PromptReach maps each overridable prompt id to the agents it reaches in
+	// this generation (sorted), overridden or not. See prompt_reach.go.
+	PromptReach map[string][]string
+
 	closers []func() error
 }
 
@@ -119,6 +123,7 @@ func BuildInstance(ctx context.Context, infra *Infrastructure, opts Options, gen
 	// enabled and the config does not already declare them. Done here (not in
 	// ResolveRuntimeSettings) so config-only tests see an unmodified squad list.
 	ensureRouterSquad(&runtime)
+	runtime.reach = newPromptReach()
 
 	// The bash timeout is a process-global; reapply on each build so a config
 	// reload picks up changes.
@@ -203,6 +208,7 @@ func BuildInstance(ctx context.Context, infra *Infrastructure, opts Options, gen
 		}
 	}
 
+	inst.PromptReach = runtime.reach.snapshot()
 	return inst, nil
 }
 
