@@ -60,6 +60,8 @@ type Instance struct {
 	// PromptReach maps each overridable prompt id to the agents it reaches in
 	// this generation (sorted), overridden or not. See prompt_reach.go.
 	PromptReach map[string][]string
+	// promptDefaults holds the tools' own descriptions (tool.<Name>).
+	promptDefaults map[string]string
 
 	closers []func() error
 }
@@ -209,6 +211,7 @@ func BuildInstance(ctx context.Context, infra *Infrastructure, opts Options, gen
 	}
 
 	inst.PromptReach = runtime.reach.snapshot()
+	inst.promptDefaults = runtime.reach.defaultsSnapshot()
 	return inst, nil
 }
 

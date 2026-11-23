@@ -59,6 +59,7 @@ func applyToolDescriptions(runtime RuntimeSettings, cfg RuntimeAgentConfig, tool
 			continue
 		}
 		runtime.reach.add("tool."+name, cfg.Name)
+		runtime.reach.setDefault("tool."+name, t.Description())
 		desc, ok := runtime.PromptOverrides["tool."+name]
 		rt, runnable := t.(runnableTool)
 		if !ok || !runnable {
