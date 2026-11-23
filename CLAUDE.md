@@ -1967,7 +1967,8 @@ and are not covered here.
   ([agent/prompt_overrides.go](agent/prompt_overrides.go)), so
   `POST /api/config/reload` applies it; a draining generation keeps its texts.
   An unknown id, a `tool.<Name>` outside the list or an empty text is left out
-  and reported in `ConfigWarnings` (shown in Settings), never a failed config.
+  and reported in `ConfigWarnings` (shown in Settings), never a failed config;
+  an unparseable file fails open the same way (warning, no overrides).
 - **Ids (v1)**: `contract.root` / `contract.subagent` (agentkit's operating
   contracts, via `AgentConfig.Contract`; the router keeps none), `block.subagents`
   (the three fixed paragraphs of the sub-agent block — the header and the
@@ -1976,8 +1977,8 @@ and are not covered here.
   `block.choice.handoff`, `block.steering`, `skills.rules`
   (`skills.ToolsetWith`), `memory.rules` (`collmem.RenderWith`; the render cache
   keys on the rules text), `memory.reminder`, and `tool.<Name>` for omnis's own
-  tools (`OverridableTools`: fs tools, `AskUserQuestion`, web, teammate, bg,
-  todo). **Each id covers fixed wording only**: a header, a generated part and a
+  tools (`OverridableTools`: fs tools, `AskUserQuestion`, `WebFetch`, teammate,
+  bg, todo; not `WebSearch`, whose text depends on the search provider). **Each id covers fixed wording only**: a header, a generated part and a
   condition stay in code, and a conditional sentence has its own id
   (`block.choice.handoff` only when `handoff_to_router` is mounted,
   `block.language.delegates` only on a delegating root), so an override can

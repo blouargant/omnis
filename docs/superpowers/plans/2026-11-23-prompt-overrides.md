@@ -40,7 +40,7 @@ conditional sentence gets its own id), so an override cannot drop a placeholder.
   `block.language.evidence`, `block.choice`,
   `block.choice.handoff`, `block.steering`, `skills.rules`, `memory.rules`,
   `memory.reminder`, and `tool.<Name>` for `Read`, `Write`, `Edit`, `MultiEdit`,
-  `Grep`, `Glob`, `Bash`, `AskUserQuestion`, `WebFetch`, `WebSearch`,
+  `Grep`, `Glob`, `Bash`, `AskUserQuestion`, `WebFetch`,
   `teammate_ask`, `teammate_tell`, `teammate_check`, `teammate_list`,
   `bash_background`, `monitor`, `bg_list`, `bg_cancel`, `bg_output`,
   `todo_write`, `todo_update`, `todo_read`.

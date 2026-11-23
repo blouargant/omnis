@@ -297,3 +297,15 @@ func TestMemoryOverridesSkipRouter(t *testing.T) {
 		t.Errorf("memory.rules reach = %v", got)
 	}
 }
+
+// WebSearch's description depends on the search provider (Serper, SerpAPI,
+// DuckDuckGo): one override would give every provider the same text, and the
+// catalogue default would be whichever agent was built first.
+func TestWebSearchIsNotOverridable(t *testing.T) {
+	_, lo := promptLayers(t)
+	writePromptFile(t, lo, `{"prompts": {"tool.WebSearch": "x"}}`)
+	got, warns := resolvePromptOverrides()
+	if len(got) != 0 || len(warns) != 1 {
+		t.Errorf("tool.WebSearch accepted: %v %v", got, warns)
+	}
+}

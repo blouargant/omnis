@@ -37,9 +37,12 @@ var PromptIDs = []string{
 
 // OverridableTools are the tools whose description `tool.<Name>` may replace
 // (v1: omnis's own tools; MCP, A2A and sub-agent tools are not included).
+// WebSearch is left out: its description depends on the search provider
+// (Serper, SerpAPI, DuckDuckGo), so one override would give every provider the
+// same text.
 var OverridableTools = []string{
 	"Read", "Write", "Edit", "MultiEdit", "Grep", "Glob", "Bash",
-	"AskUserQuestion", "WebFetch", "WebSearch",
+	"AskUserQuestion", "WebFetch",
 	"teammate_ask", "teammate_tell", "teammate_check", "teammate_list",
 	"bash_background", "monitor", "bg_list", "bg_cancel", "bg_output",
 	"todo_write", "todo_update", "todo_read",
