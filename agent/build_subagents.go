@@ -180,7 +180,7 @@ func buildSubAgentsFromConfigs(
 			}
 			// Same capabilities block the squad root gets: the delegation contract and
 			// each teammate's description are how this agent knows what its team is for.
-			instr += buildSubAgentCapabilitiesBlock(nestedCfgs, runtime)
+			instr += buildSubAgentCapabilitiesBlockFor(nestedCfgs, runtime, cfg.Name)
 		}
 
 		// Mid-turn steering for sub-agents: while a sub-agent runs the leader is

@@ -194,3 +194,80 @@ func firstLine(s string) string {
 	}
 	return s
 }
+
+func overrides(kv ...string) RuntimeSettings {
+	m := map[string]string{}
+	for i := 0; i+1 < len(kv); i += 2 {
+		m[kv[i]] = kv[i+1]
+	}
+	return RuntimeSettings{PromptOverrides: m}
+}
+
+func TestBlockOverridesKeepConditions(t *testing.T) {
+	rt := overrides("block.choice", "CHOICE-RULE", "block.choice.handoff", "HANDOFF-SENTENCE",
+		"block.language.delegates", "DELEGATES-RULE")
+	if b := choicePolicyBlockFor(rt, "x", false); strings.Contains(b, "HANDOFF-SENTENCE") || !strings.Contains(b, "CHOICE-RULE") {
+		t.Errorf("choice without handsBack: %q", b)
+	}
+	if b := choicePolicyBlockFor(rt, "x", true); !strings.Contains(b, "HANDOFF-SENTENCE") {
+		t.Errorf("choice with handsBack lacks the handoff override: %q", b)
+	}
+	if b := languagePolicyBlockFor(rt, "x", false); strings.Contains(b, "DELEGATES-RULE") {
+		t.Errorf("leaderless language block got the delegates override: %q", b)
+	}
+	if b := languagePolicyBlockFor(rt, "x", true); !strings.Contains(b, "DELEGATES-RULE") {
+		t.Errorf("delegating language block lacks the delegates override: %q", b)
+	}
+}
+
+func TestBlockOverridesReplaceText(t *testing.T) {
+	cases := []struct {
+		id     string
+		render func(RuntimeSettings) string
+		def    string
+	}{
+		{"block.choice", func(r RuntimeSettings) string { return choicePolicyBlockFor(r, "x", true) }, "call `AskUserQuestion`"},
+		{"block.choice.handoff", func(r RuntimeSettings) string { return choicePolicyBlockFor(r, "x", true) }, "instead of asking the user what kind"},
+		{"block.language", func(r RuntimeSettings) string { return languagePolicyBlockFor(r, "x", true) }, "Reply to the user in the language"},
+		{"block.language.delegates", func(r RuntimeSettings) string { return languagePolicyBlockFor(r, "x", true) }, "Write your instructions to sub-agents"},
+		{"block.language.evidence", func(r RuntimeSettings) string { return languagePolicyBlockFor(r, "x", true) }, "Do not translate evidence"},
+		{"block.steering", func(r RuntimeSettings) string { return steeringAwarenessBlockFor(r, "x") }, "is the user's latest intent"},
+		{"block.handoff", func(r RuntimeSettings) string { return routerHandoffProtocolBlockFor(r, "x") }, "The router gave you this conversation"},
+		{"block.subagents", func(r RuntimeSettings) string {
+			return buildSubAgentCapabilitiesBlockFor([]RuntimeAgentConfig{{Name: "fake", Enabled: true}}, r, "x")
+		}, "A call is synchronous and one-shot"},
+	}
+	for _, c := range cases {
+		marker := "MARKER-" + c.id
+		got := c.render(overrides(c.id, marker))
+		if !strings.Contains(got, marker) || strings.Contains(got, c.def) {
+			t.Errorf("%s: override not applied or default kept:\n%s", c.id, got)
+		}
+		if def := c.render(RuntimeSettings{}); !strings.Contains(def, c.def) {
+			t.Errorf("%s: default text missing", c.id)
+		}
+	}
+}
+
+func TestSubAgentBlockKeepsGeneratedList(t *testing.T) {
+	cfgs := []RuntimeAgentConfig{{Name: "fake", Enabled: true, Description: "Finds things."}}
+	got := buildSubAgentCapabilitiesBlockFor(cfgs, overrides("block.subagents", "NEW RULES"), "x")
+	for _, s := range []string{"# Available Sub-Agents", "NEW RULES", "**fake**: Finds things."} {
+		if !strings.Contains(got, s) {
+			t.Errorf("block lacks %q:\n%s", s, got)
+		}
+	}
+}
+
+func TestBlockReachRecordsUsedParts(t *testing.T) {
+	rt := RuntimeSettings{reach: newPromptReach()}
+	choicePolicyBlockFor(rt, "solo", false)
+	languagePolicyBlockFor(rt, "solo", false)
+	got := rt.reach.snapshot()
+	if len(got["block.choice.handoff"]) != 0 || len(got["block.language.delegates"]) != 0 {
+		t.Errorf("a part not written was recorded: %v", got)
+	}
+	if !reflect.DeepEqual(got["block.choice"], []string{"solo"}) || !reflect.DeepEqual(got["block.language.evidence"], []string{"solo"}) {
+		t.Errorf("reach = %v", got)
+	}
+}

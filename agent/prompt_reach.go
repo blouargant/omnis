@@ -2,6 +2,7 @@ package agent
 
 import (
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -51,4 +52,11 @@ func (r *promptReach) snapshot() map[string][]string {
 func usePrompt(runtime RuntimeSettings, id, agent, def string) string {
 	runtime.reach.add(id, agent)
 	return promptText(runtime, id, def)
+}
+
+// blockPart is usePrompt for a part written without its trailing newlines
+// (the caller adds them): an override's own trailing newlines are dropped so a
+// block keeps its spacing whatever the override ends with.
+func blockPart(runtime RuntimeSettings, id, agent, def string) string {
+	return strings.TrimRight(usePrompt(runtime, id, agent, def), "\n")
 }

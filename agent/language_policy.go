@@ -19,15 +19,27 @@ package agent
 // (the sub-agent request is a free-text string the model authors), so here it is
 // an instruction.
 func languagePolicyBlock(delegates bool) string {
+	return languagePolicyBlockFor(RuntimeSettings{}, "", delegates)
+}
+
+const (
+	defaultLanguageReply = "Reply to the user in the language they wrote in, including in `AskUserQuestion`; " +
+		"that is the only place you translate."
+	defaultLanguageDelegates = "Write your instructions to sub-agents in English, but never paraphrase the user's " +
+		"request: quote it verbatim, in their language, beside your framing — its wording " +
+		"carries scope a translation loses (\"le président de la République\" means France)."
+	defaultLanguageEvidence = "Do not translate evidence: quotes, code, errors, logs and file contents stay in " +
+		"their original language."
+)
+
+// languagePolicyBlockFor is languagePolicyBlock with the generation's
+// overrides; the header, the bullets and the delegates condition stay in code.
+func languagePolicyBlockFor(runtime RuntimeSettings, agent string, delegates bool) string {
 	b := "\n\n## Language\n\n" +
-		"- Reply to the user in the language they wrote in, including in `AskUserQuestion`; " +
-		"that is the only place you translate.\n"
+		"- " + blockPart(runtime, "block.language", agent, defaultLanguageReply) + "\n"
 	if delegates {
-		b += "- Write your instructions to sub-agents in English, but never paraphrase the user's " +
-			"request: quote it verbatim, in their language, beside your framing — its wording " +
-			"carries scope a translation loses (\"le président de la République\" means France).\n"
+		b += "- " + blockPart(runtime, "block.language.delegates", agent, defaultLanguageDelegates) + "\n"
 	}
-	b += "- Do not translate evidence: quotes, code, errors, logs and file contents stay in " +
-		"their original language.\n"
+	b += "- " + blockPart(runtime, "block.language.evidence", agent, defaultLanguageEvidence) + "\n"
 	return b
 }
