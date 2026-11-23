@@ -1,6 +1,7 @@
 package collmem
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"sort"
@@ -69,17 +70,27 @@ const (
 // on every model call is cheap. Nothing is cached when the directory cannot be
 // read (e.g. it does not exist yet).
 func (s *Store) Render(collection, label string, forRouter bool) string {
+	return s.RenderWith(collection, label, forRouter, Rules)
+}
+
+// RenderWith is Render with another rules text (prompt_overrides.json
+// memory.rules; empty means Rules). The rules text is part of the cache key, so
+// a reload that changes it never serves the block rendered with the old one.
+func (s *Store) RenderWith(collection, label string, forRouter bool, rules string) string {
+	if rules == "" {
+		rules = Rules
+	}
 	dir := s.Dir(collection)
 	sig, ok := dirSignature(dir)
 	today := now().Format("2006-01-02")
-	key := fmt.Sprintf("%s\x00%s\x00%t", dir, label, forRouter)
+	key := fmt.Sprintf("%s\x00%s\x00%t\x00%x", dir, label, forRouter, sha256.Sum256([]byte(rules)))
 	sig += "|" + today // a new day re-renders in place (no entry per day)
 	if ok {
 		if out, hit := renderCacheGet(key, sig); hit {
 			return out
 		}
 	}
-	out := s.render(collection, label, forRouter, today)
+	out := s.render(collection, label, forRouter, today, rules)
 	if ok {
 		renderCachePut(key, sig, out)
 	}
@@ -87,7 +98,7 @@ func (s *Store) Render(collection, label string, forRouter bool) string {
 }
 
 // render builds the block without consulting the cache.
-func (s *Store) render(collection, label string, forRouter bool, today string) string {
+func (s *Store) render(collection, label string, forRouter bool, today, rules string) string {
 	mems := s.List(collection)
 	if forRouter {
 		if len(mems) == 0 {
@@ -107,7 +118,7 @@ func (s *Store) render(collection, label string, forRouter bool, today string) s
 	for _, m := range mems {
 		inline[m.Name] = true
 	}
-	out := renderAnswering(label, mems, inline, false, today)
+	out := renderAnswering(label, mems, inline, false, today, rules)
 	if len(out) <= BlockBudgetChars {
 		return out
 	}
@@ -130,7 +141,7 @@ func (s *Store) render(collection, label string, forRouter bool, today string) s
 	})
 	for _, m := range cand {
 		delete(inline, m.Name)
-		out = renderAnswering(label, mems, inline, true, today)
+		out = renderAnswering(label, mems, inline, true, today, rules)
 		if len(out) <= BlockBudgetChars {
 			break
 		}
@@ -149,10 +160,10 @@ func demotePriority(typ string) int {
 // renderAnswering builds the answering-root block; inline names the memories
 // whose bodies are shown in full, every other memory gets an index line.
 // demoted adds DemotedNote (some bodies were cut for the budget).
-func renderAnswering(label string, mems []Memory, inline map[string]bool, demoted bool, today string) string {
+func renderAnswering(label string, mems []Memory, inline map[string]bool, demoted bool, today, rules string) string {
 	var b strings.Builder
 	b.WriteString(openTag(label))
-	b.WriteString(Rules + "\n")
+	b.WriteString(rules + "\n")
 	if demoted {
 		b.WriteString("\n" + DemotedNote + "\n")
 	}

@@ -222,7 +222,7 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 	// An empty/nil list means all installed skills in the registry are visible.
 	// Always rebuilt per-agent so each agent sees exactly its declared skills.
 	resolvedSkillTS := skillTS // fallback if Toolset fails
-	if ts, err := skills.Toolset(ctx, cfg.Skills); err == nil {
+	if ts, err := skills.ToolsetWith(ctx, cfg.Skills, promptText(runtime, "skills.rules", skills.DefaultInstruction)); err == nil {
 		resolvedSkillTS = ts
 	}
 	// Resolve the candidate MCP handle pool for this agent: by default the
@@ -276,6 +276,7 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			}
 		case "Skill":
 			if resolvedSkillTS != nil {
+				runtime.reach.add("skills.rules", cfg.Name)
 				toolsets = append(toolsets, resolvedSkillTS)
 			}
 		case "softskills":

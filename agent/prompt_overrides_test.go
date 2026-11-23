@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	adkagent "google.golang.org/adk/v2/agent"
+	"google.golang.org/genai"
 
 	"github.com/blouargant/omnis/core/agentkit"
 )
@@ -269,5 +270,30 @@ func TestBlockReachRecordsUsedParts(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got["block.choice"], []string{"solo"}) || !reflect.DeepEqual(got["block.language.evidence"], []string{"solo"}) {
 		t.Errorf("reach = %v", got)
+	}
+}
+
+func TestMemoryReminderOverride(t *testing.T) {
+	contents := []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: "hello"}}}}
+	appendTurnReminder(contents, memoryReminderText(overrides("memory.reminder", "REMEMBER-THIS")))
+	if got := contents[0].Parts[len(contents[0].Parts)-1].Text; got != "REMEMBER-THIS" {
+		t.Errorf("reminder = %q", got)
+	}
+	if memoryReminderText(RuntimeSettings{}) != memoryTurnReminder {
+		t.Errorf("default reminder changed")
+	}
+}
+
+func TestMemoryOverridesSkipRouter(t *testing.T) {
+	t.Setenv("OMNIS_HOME", t.TempDir())
+	rt := RuntimeSettings{PromptOverrides: map[string]string{"memory.rules": "MEM-RULES"}, reach: newPromptReach()}
+	if got := collectionCtxBlockWith("s", false, memoryRulesFor(rt, "leader")); !strings.Contains(got, "MEM-RULES") {
+		t.Errorf("answering block lacks the rules override:\n%s", got)
+	}
+	if got := collectionCtxBlockWith("s", true, ""); strings.Contains(got, "MEM-RULES") {
+		t.Errorf("router got the memory rules")
+	}
+	if got := rt.reach.snapshot()["memory.rules"]; !reflect.DeepEqual(got, []string{"leader"}) {
+		t.Errorf("memory.rules reach = %v", got)
 	}
 }

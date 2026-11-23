@@ -41,6 +41,15 @@ A skill's other files: ` + "`load_skill_resource`" + ` with ` + "`skill_name`" +
 // empty all discovered skills are visible; when non-empty only the named
 // skills are exposed.
 func Toolset(ctx context.Context, skillNames []string) (tool.Toolset, error) {
+	return ToolsetWith(ctx, skillNames, "")
+}
+
+// ToolsetWith is Toolset with another system instruction
+// (prompt_overrides.json skills.rules); empty means DefaultInstruction.
+func ToolsetWith(ctx context.Context, skillNames []string, instruction string) (tool.Toolset, error) {
+	if instruction == "" {
+		instruction = DefaultInstruction
+	}
 	// Ensure the primary write-target directory exists so the web UI can install
 	// into it even when no skill is present yet.
 	if err := os.MkdirAll(paths.SkillsRegistryWriteDir(), 0o755); err != nil {
@@ -57,7 +66,7 @@ func Toolset(ctx context.Context, skillNames []string) (tool.Toolset, error) {
 	src := resilientSource{Source: skill.NewFileSystemSource(fsys), fsys: fsys}
 	ts, err := skilltoolset.New(ctx, skilltoolset.Config{
 		Source:            src,
-		SystemInstruction: DefaultInstruction,
+		SystemInstruction: instruction,
 	})
 	if err != nil {
 		return nil, err
