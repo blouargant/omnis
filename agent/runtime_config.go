@@ -108,6 +108,11 @@ type AgentEntry struct {
 	// declarations are withheld from every model call until the session loads
 	// them with tool_search (or calls one by name). See agent/deferred_tools.go.
 	DeferredTools []string `json:"deferred_tools,omitempty"`
+	// TurnReminder is a short note appended to every typed user message of
+	// this agent's requests when it is a squad root (agent/turn_reminder.go).
+	// A rule a weaker model skips at the top of a long system instruction is
+	// read when it sits next to the user's words.
+	TurnReminder string `json:"turn_reminder,omitempty"`
 	// ReadOnly makes the agent unable to change the filesystem outside the
 	// scratch directories: Bash runs under the Landlock sandbox, file writes
 	// are limited to scratch paths, project-changing tools are removed. See
@@ -358,6 +363,8 @@ type RuntimeAgentConfig struct {
 	// DeferredTools is the trimmed agent.json deferred_tools list (case kept:
 	// tool names are case-sensitive).
 	DeferredTools []string
+	// TurnReminder is agent.json turn_reminder, trimmed (see AgentEntry).
+	TurnReminder string
 	// ReadOnly is agent.json read_only (see AgentEntry.ReadOnly).
 	ReadOnly bool
 	// Lessons is agent.json lessons with its opt-out default applied (true
@@ -817,6 +824,7 @@ func resolveAgentEntries(entries []AgentEntry, modelCatalog map[string]RuntimeMo
 			ResumableSessions:                 resumableEnabled(e.ResumableSessions),
 			SubAgents:                         normalizeSubAgents(e.SubAgents),
 			DeferredTools:                     trimList(e.DeferredTools),
+			TurnReminder:                      strings.TrimSpace(e.TurnReminder),
 			ReadOnly:                          e.ReadOnly,
 			Lessons:                           e.Lessons == nil || *e.Lessons,
 		})
@@ -922,6 +930,7 @@ func normalizedAgentConfig(in RuntimeAgentConfig) RuntimeAgentConfig {
 		ResumableSessions:                 in.ResumableSessions,
 		SubAgents:                         normalizeSubAgents(in.SubAgents),
 		DeferredTools:                     trimList(in.DeferredTools),
+		TurnReminder:                      strings.TrimSpace(in.TurnReminder),
 		ReadOnly:                          in.ReadOnly,
 		Lessons:                           in.Lessons,
 		Plugin:                            in.Plugin,
