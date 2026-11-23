@@ -171,6 +171,12 @@ func buildPlugins(
 	if col, err := collectionCtxPlugin("collection_ctx", isRouterSquad); err == nil {
 		plugins = append(plugins, col)
 	}
+	// The root agent's own per-message reminder (agent.json turn_reminder).
+	if !isRouterSquad && rootCfg.TurnReminder != "" {
+		if tr, err := turnReminderPlugin("turn_reminder", rootCfg.TurnReminder); err == nil {
+			plugins = append(plugins, tr)
+		}
+	}
 	// An agent's promoted lessons, appended to the root's system instruction
 	// (answering roots only; no prompt lesson ⇒ the request is untouched).
 	if !isRouterSquad && lessonsActive(runtime, rootCfg) {

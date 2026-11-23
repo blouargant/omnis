@@ -27,5 +27,6 @@
     "bg",
     "spawn",
     "session_history"
-  ]
+  ],
+  "turn_reminder": "[Delegation — a question that needs evidence from the machine beyond one quick lookup (several files, logs, a remote host, a cause to establish) goes to the 'investigator' sub-agent first, not to your own Bash, Read, Grep or Glob; a single quick lookup you may do yourself. Two independent questions = two 'investigator' calls in the same response. If the investigator's answer is empty or off-topic, re-task it once with different guidance and no more. Always end with a written answer to the user, saying what is unverified.]"
 }

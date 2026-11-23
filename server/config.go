@@ -857,6 +857,9 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 						if len(a.DeferredTools) > 0 {
 							agentMap["deferred_tools"] = a.DeferredTools
 						}
+						if a.TurnReminder != "" {
+							agentMap["turn_reminder"] = a.TurnReminder
+						}
 						if a.ReadOnly {
 							agentMap["read_only"] = true
 						}
@@ -1063,7 +1066,7 @@ func registerConfigRoutes(rg *gin.RouterGroup, files configFiles, restart *resta
 								// team and its cap, handing retrieval back to the expensive
 								// model — the exact regression this feature exists to prevent.
 								"subagents", "max_tool_calls", "max_tool_calls_per_call",
-								"deferred_tools", "read_only", "lessons":
+								"deferred_tools", "read_only", "lessons", "turn_reminder":
 								if isEmptyOverlayValue(v) {
 									continue
 								}

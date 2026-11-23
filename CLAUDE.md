@@ -1923,6 +1923,36 @@ sub-agents dominate and vary 2-3×). Report:
 `web/docs` does not document the single-model override, so the Helper answers
 that no such setting exists.
 
+### Per-message reminder (`turn_reminder`)
+
+An agent's `agent.json` may set **`turn_reminder`**: a short note appended, as a
+late part, to every typed user message of the requests it makes **as a squad
+root** ([agent/turn_reminder.go](agent/turn_reminder.go) `appendTurnReminder`,
+plugin `turn_reminder` in `buildPlugins`, non-router roots only; sub-agents
+ignore it). Same placement rules as the memory reminder, which now shares the
+helper: never on a tool result or the compression summary, on every message so
+the request stays a stable prefix for the prompt cache, idempotent, the user's
+words stay the first part. Round-trips through the Settings GET/PUT allowlist
+(`TestParsedAgentRoundTripKeepsTurnReminder`); not in the Settings form nor
+`set_agent` yet.
+
+**Why:** the System leader's delegation rules, whatever their wording in the
+system instruction, did not reach `balanced` (unprompted delegation 1/25, no
+fan-out). With the shipped reminder on `leader`: unprompted delegation 5/5,
+two independent questions = two parallel calls 5/5; `premium` unchanged
+(`omnis-benches/reports/leader-fake-2026-11.md`, fourth and fifth runs).
+
+**GOTCHA — the wording was benched on the real squad, keep both clauses.** A
+first wording ("goes to the investigator first… then stop and say what is
+unverified") made `premium` delegate every one-step lookup (3 s → 13-26 s) and
+`balanced` end 5 real turns of 36 on an empty reply. The shipped one leaves "a
+single quick lookup" to the leader and ends with "Always end with a written
+answer": 0 empty replies in 48 real runs, no lookup delegated. Known cost: a
+two-question task on a tiny directory takes ~30-45 s through two investigator
+calls instead of ~6 s. Not fixed: `balanced` still makes 2-4 calls on empty
+evidence. Re-run `tasks-leader-fake.json`, `tasks-leader-fake-direct.json` and
+`tasks-leader-real.json` (omnis-benches `squad-bench`) before rewording it.
+
 ### Deferred tools (`deferred_tools`) and the fixed prompt
 
 Every declared tool's schema, and the whole system instruction, are re-sent on

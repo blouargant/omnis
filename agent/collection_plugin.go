@@ -248,18 +248,5 @@ const memoryTurnReminder = "[Memory — before you answer: if this message corre
 // reminder is the last part, so userWordsFromContents (first text part) never
 // takes it for the user's words. Idempotent.
 func appendMemoryReminder(contents []*genai.Content) {
-	for _, c := range contents {
-		if c == nil || c.Role != "user" || len(c.Parts) == 0 {
-			continue
-		}
-		first := c.Parts[0]
-		if first == nil || first.FunctionResponse != nil || strings.TrimSpace(first.Text) == "" ||
-			strings.Contains(first.Text, compressedHistoryMarker) {
-			continue
-		}
-		if last := c.Parts[len(c.Parts)-1]; last != nil && last.Text == memoryTurnReminder {
-			continue
-		}
-		c.Parts = append(c.Parts, &genai.Part{Text: memoryTurnReminder})
-	}
+	appendTurnReminder(contents, memoryTurnReminder)
 }
