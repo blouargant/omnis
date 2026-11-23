@@ -403,6 +403,7 @@ func buildSquadInstance(
 
 	// Rarely used tools are callable but undeclared until tool_search loads
 	// them (agent.json deferred_tools; no-op when empty).
+	leadTools = applyToolDescriptions(runtime, rootCfg, leadTools)
 	leadTools = applyReadOnly(rootCfg, leadTools, capToolsets)
 	leadTools = applyDeferredTools(rootCfg.DeferredTools, leadTools)
 

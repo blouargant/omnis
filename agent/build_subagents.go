@@ -155,6 +155,7 @@ func buildSubAgentsFromConfigs(
 		subTools, subToolsets, extraInstr, subHandles := toolsForAgentConfig(ctx, cfg, runtime, skillTS, leaderMCPHandles, pool, codeIdx, regIdx, docIdx, sessIdx, attestStore)
 		mcpHandles = append(mcpHandles, subHandles...)
 		instr = extraInstr + instr
+		subTools = applyToolDescriptions(runtime, cfg, subTools)
 		subTools = applyReadOnly(cfg, subTools, subToolsets)
 		subTools = applyDeferredTools(cfg.DeferredTools, subTools)
 
