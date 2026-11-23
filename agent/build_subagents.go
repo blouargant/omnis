@@ -155,6 +155,7 @@ func buildSubAgentsFromConfigs(
 		subTools, subToolsets, extraInstr, subHandles := toolsForAgentConfig(ctx, cfg, runtime, skillTS, leaderMCPHandles, pool, codeIdx, regIdx, docIdx, sessIdx, attestStore)
 		mcpHandles = append(mcpHandles, subHandles...)
 		instr = extraInstr + instr
+		subTools = applyToolDescriptions(runtime, cfg, subTools)
 		subTools = applyReadOnly(cfg, subTools, subToolsets)
 		subTools = applyDeferredTools(cfg.DeferredTools, subTools)
 
@@ -180,7 +181,7 @@ func buildSubAgentsFromConfigs(
 			}
 			// Same capabilities block the squad root gets: the delegation contract and
 			// each teammate's description are how this agent knows what its team is for.
-			instr += buildSubAgentCapabilitiesBlock(nestedCfgs, runtime)
+			instr += buildSubAgentCapabilitiesBlockFor(nestedCfgs, runtime, cfg.Name)
 		}
 
 		// Mid-turn steering for sub-agents: while a sub-agent runs the leader is
@@ -269,6 +270,7 @@ func buildSubAgentsFromConfigs(
 			Model:                 agentLLM,
 			OnModelErrorCallbacks: []llmagent.OnModelErrorCallback{compressOnErr},
 			SubAgent:              true,
+			Contract:              usePrompt(runtime, "contract.subagent", cfg.Name, agentkit.SubAgentSystemPrompt),
 			Tools:                 subTools,
 			Toolsets:              subToolsets,
 			BeforeToolCallbacks:   beforeTool,

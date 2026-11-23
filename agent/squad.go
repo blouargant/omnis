@@ -378,33 +378,41 @@ func buildSquadInstance(
 			// `subagents` — so two squads can specialise the same agent.json by
 			// exposing different subsets, and so a leaderless root actually knows
 			// about the team it was just given.
-			rootInstruction += buildSubAgentCapabilitiesBlock(memberCfgs, runtime)
+			rootInstruction += buildSubAgentCapabilitiesBlockFor(memberCfgs, runtime, rootCfg.Name)
 		}
 		if routingEnabled {
 			// Non-router squad: tell the leader to hand control back to the
 			// router when a request falls outside its scope.
-			rootInstruction += routerHandoffProtocolBlock()
+			rootInstruction += routerHandoffProtocolBlockFor(runtime, rootCfg.Name)
 		}
 		// Reply in the user's language, delegate in English, and never let a
 		// paraphrase strip the scope their wording carried (see
 		// languagePolicyBlock).
-		rootInstruction += languagePolicyBlock(!leaderless)
+		rootInstruction += languagePolicyBlockFor(runtime, rootCfg.Name, !leaderless)
 		// A decision the user must make belongs in an AskUserQuestion menu, which
 		// keeps the turn alive — not in prose, which ends it (see
 		// choicePolicyBlock). Same block carries the guard against using a menu to
 		// offload a decision the root itself owns.
-		rootInstruction += choicePolicyBlock(routingEnabled)
+		rootInstruction += choicePolicyBlockFor(runtime, rootCfg.Name, routingEnabled)
 		// Make the root aware it can be steered mid-turn and should forward a
 		// relevant note to a delegated sub-agent (see steeringAwarenessBlock).
 		if infra.SteerStore != nil {
-			rootInstruction += steeringAwarenessBlock()
+			rootInstruction += steeringAwarenessBlockFor(runtime, rootCfg.Name)
 		}
 	}
 
 	// Rarely used tools are callable but undeclared until tool_search loads
 	// them (agent.json deferred_tools; no-op when empty).
+	leadTools = applyToolDescriptions(runtime, rootCfg, leadTools)
 	leadTools = applyReadOnly(rootCfg, leadTools, capToolsets)
 	leadTools = applyDeferredTools(rootCfg.DeferredTools, leadTools)
+
+	// The operating contract (prompt_overrides.json contract.root). The router
+	// gets none (NoContract), so it is neither overridden nor recorded there.
+	var rootContract string
+	if !isRouter {
+		rootContract = usePrompt(runtime, "contract.root", rootCfg.Name, agentkit.SystemPrompt)
+	}
 
 	lead, err := agentkit.New(agentkit.AgentConfig{
 		Name:        rootCfg.Name,
@@ -415,6 +423,7 @@ func buildSquadInstance(
 		Instruction: rootInstruction,
 		// The router only routes; its text is withheld. See AgentConfig.NoContract.
 		NoContract: runtime.RouterSquad != "" && squad.Name == runtime.RouterSquad,
+		Contract:   rootContract,
 	})
 	if err != nil {
 		permGateClose()

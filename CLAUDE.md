@@ -1953,6 +1953,57 @@ calls instead of ~6 s. Not fixed: `balanced` still makes 2-4 calls on empty
 evidence. Re-run `tasks-leader-fake.json`, `tasks-leader-fake-direct.json` and
 `tasks-leader-real.json` (omnis-benches `squad-bench`) before rewording it.
 
+### Prompt overrides (`prompt_overrides.json`)
+
+omnis's **shared** prompt texts can be replaced by stable id, without a rebuild,
+so the GEPA tool in `omnis-benches/gepa` can evolve them (spec
+[docs/superpowers/specs/2026-11-23-gepa-prompt-evolution-design.md](docs/superpowers/specs/2026-11-23-gepa-prompt-evolution-design.md)).
+An agent's own `instruction.md`, `turn_reminder` and skills are already files
+and are not covered here.
+
+- **File** `{"prompts": {"<id>": "<text>"}}`, merged across config layers by key
+  (`configedit` `mapColl` on `prompts`, tombstone `prompts_removed`). Resolved
+  in `ResolveRuntimeSettings` into `RuntimeSettings.PromptOverrides`
+  ([agent/prompt_overrides.go](agent/prompt_overrides.go)), so
+  `POST /api/config/reload` applies it; a draining generation keeps its texts.
+  An unknown id, a `tool.<Name>` outside the list or an empty text is left out
+  and reported in `ConfigWarnings` (shown in Settings), never a failed config;
+  an unparseable file fails open the same way (warning, no overrides).
+- **Ids (v1)**: `contract.root` / `contract.subagent` (agentkit's operating
+  contracts, via `AgentConfig.Contract`; the router keeps none), `block.subagents`
+  (the three fixed paragraphs of the sub-agent block — the header and the
+  per-agent list stay generated), `block.handoff`, `block.language`,
+  `block.language.delegates`, `block.language.evidence`, `block.choice`,
+  `block.choice.handoff`, `block.steering`, `skills.rules`
+  (`skills.ToolsetWith`), `memory.rules` (`collmem.RenderWith`; the render cache
+  keys on the rules text), `memory.reminder`, and `tool.<Name>` for omnis's own
+  tools (`OverridableTools`: fs tools, `AskUserQuestion`, `WebFetch`, teammate,
+  bg, todo; not `WebSearch`, whose text depends on the search provider). **Each id covers fixed wording only**: a header, a generated part and a
+  condition stay in code, and a conditional sentence has its own id
+  (`block.choice.handoff` only when `handoff_to_router` is mounted,
+  `block.language.delegates` only on a delegating root), so an override can
+  neither drop a generated part nor show a sentence where its condition is off.
+  An override's trailing newlines are dropped (the block keeps its spacing).
+- **Tool descriptions**: `applyToolDescriptions`
+  ([agent/described_tool.go](agent/described_tool.go)) wraps the tool in
+  `describedTool` (packs ITSELF, `Run` delegates; only `Description` and the
+  declaration's description change). Applied **before** `applyReadOnly` — a
+  read-only agent's `Write` appends its READ-ONLY note to the override, and its
+  `Bash` is the read-only Bash with its own text, which `tool.Bash` does not
+  touch (and is not recorded for) — and before `applyDeferredTools`, so a
+  deferred tool's `tool_search` result carries the override.
+- **Reach**: while a generation is built every place writing a shared text
+  records `(id, agent)` (`RuntimeSettings.reach`, [agent/prompt_reach.go](agent/prompt_reach.go)),
+  overridden or not; `Instance.PromptReach` holds the result. A text shared by
+  several agents must be tested on all of them, and the GEPA tool reads the
+  list from **`GET /api/prompts`** ([server/prompts.go](server/prompts.go),
+  token-gated, `{"prompts": [{id, default, override?, agents}]}` sorted by id,
+  texts only; not shown in Settings).
+- **No-op contract**: with no file every text is byte-identical — pinned by
+  `TestPromptGoldenDefaults` against `agent/testdata/prompts_golden/` (rewrite
+  with `go test ./agent -run TestPromptGoldenDefaults -update` only when a
+  default text is changed on purpose).
+
 ### Deferred tools (`deferred_tools`) and the fixed prompt
 
 Every declared tool's schema, and the whole system instruction, are re-sent on
@@ -2988,6 +3039,7 @@ per-user `agents.json` no longer freezes the whole config. The engine lives in
 | `disabled_plugins` (in `agents.json`) | Names of installed Claude Code plugins that are switched off (agents, squad, skills, hooks not loaded). Toggled from Settings → Agents → Plugins (`PUT /api/plugins/:name`) |
 | `permissions.json` | Tool permission rules in Claude Code nomenclature (`permissions.{allow,ask,deny}` + `defaultMode`); old `always_*` files auto-convert on load |
 | `hooks.json` | Claude Code-style lifecycle hooks: shell commands fired on tool/prompt/session/compaction events (`hooks.{PreToolUse,PostToolUse,UserPromptSubmit,Stop,SubagentStop,SessionStart,SessionEnd,PreCompact,Notification}`). **Now shipped** with one real entry — the Kubernetes change-validation `PreToolUse` hook, `fail_closed`, matcher `Bash` — on every channel except the Windows ones (POSIX-only; see "Distribution / packaging"). See "Lifecycle hooks" and "Kubernetes squad (change validation)" |
+| `prompt_overrides.json` | Replaces shared prompt texts (operating contracts, policy blocks, skill and memory rules, omnis tool descriptions) by id; merged across layers by key. See "Prompt overrides" |
 | `hooks/k8s-validate.py` | The shipped Kubernetes validation hook script `hooks.json` invokes: proves a `Bash` command provably read-only or refuses it, previews a mutation (`kubectl diff`/`--dry-run=server`, `helm diff`/`--dry-run=server`, or a blast-radius `kubectl get` for a deletion), and requires an `APPROVED` `record_validation` attestation whose subject binds the change's content before letting it through. Python 3 stdlib only (declared package dependency — see "Distribution / packaging"). See "Kubernetes squad (change validation)" |
 
 **Removed: `token_optimization` / `bash_output_filters_dir` / `filters/`.** The

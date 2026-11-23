@@ -222,7 +222,7 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 	// An empty/nil list means all installed skills in the registry are visible.
 	// Always rebuilt per-agent so each agent sees exactly its declared skills.
 	resolvedSkillTS := skillTS // fallback if Toolset fails
-	if ts, err := skills.Toolset(ctx, cfg.Skills); err == nil {
+	if ts, err := skills.ToolsetWith(ctx, cfg.Skills, promptText(runtime, "skills.rules", skills.DefaultInstruction)); err == nil {
 		resolvedSkillTS = ts
 	}
 	// Resolve the candidate MCP handle pool for this agent: by default the
@@ -276,6 +276,7 @@ func toolsForAgentConfig(ctx context.Context, cfg RuntimeAgentConfig, runtime Ru
 			}
 		case "Skill":
 			if resolvedSkillTS != nil {
+				runtime.reach.add("skills.rules", cfg.Name)
 				toolsets = append(toolsets, resolvedSkillTS)
 			}
 		case "softskills":
@@ -886,6 +887,18 @@ func parseSkillFrontMatter(b []byte) (name, description string) {
 // (excluding the leader) with their descriptions, tools, skill
 // catalogs (when the agent has the `skills` tool group), and how to invoke them.
 func buildSubAgentCapabilitiesBlock(runtimeAgents []RuntimeAgentConfig, runtime RuntimeSettings) string {
+	return buildSubAgentCapabilitiesBlockFor(runtimeAgents, runtime, "")
+}
+
+// defaultSubAgentRules is the fixed part of the sub-agent block
+// (block.subagents); the header and the per-agent list stay generated.
+const defaultSubAgentRules = "Each sub-agent below is a tool: call it by name with a `request`. A call is synchronous and one-shot: the returned text is its complete, final answer, with no initialization phase and nothing running afterwards — never tell the user you are waiting for it. Put independent questions in separate calls of the same response (they run in parallel); combine two only when one needs the other's answer.\n\n" +
+	"Briefing a sub-agent: it starts in a fresh session and sees ONLY the `request` string. Give it the file paths it should read, prior findings, constraints and the shape of answer you want; name EVERY skill of its catalog that matches (same-domain skills are complementary) and the MCP server to use when one fits. Past ~20 lines (the 20-line rule), write the brief to a scratch file (e.g. `$OMNIS_HOME/logs/brief_<topic>.md`) and point `request` at it.\n\n" +
+	"If the answer is empty or misses the point, an identical re-call will reproduce it: change the brief, the skill or the agent. After two unhelpful attempts on the same sub-agent, stop calling it — do the work yourself, or answer with what you have and say what is unverified. Never use transfer_to_agent."
+
+// buildSubAgentCapabilitiesBlockFor is buildSubAgentCapabilitiesBlock with the
+// overrides, recording block.subagents as reaching owner (the delegating agent).
+func buildSubAgentCapabilitiesBlockFor(runtimeAgents []RuntimeAgentConfig, runtime RuntimeSettings, owner string) string {
 	var enabled []RuntimeAgentConfig
 	for _, cfg := range runtimeAgents {
 		if cfg.Name == "leader" || !cfg.Enabled {
@@ -906,9 +919,7 @@ func buildSubAgentCapabilitiesBlock(runtimeAgents []RuntimeAgentConfig, runtime 
 	// Each rule comes from an observed failure: a leader re-calling a sub-agent
 	// "to let it finish" six times; bare briefs that made the sub-agent
 	// rediscover everything; delegations naming only one of two matching skills.
-	sb.WriteString("Each sub-agent below is a tool: call it by name with a `request`. A call is synchronous and one-shot: the returned text is its complete, final answer, with no initialization phase and nothing running afterwards — never tell the user you are waiting for it. Put independent questions in separate calls of the same response (they run in parallel); combine two only when one needs the other's answer.\n\n")
-	sb.WriteString("Briefing a sub-agent: it starts in a fresh session and sees ONLY the `request` string. Give it the file paths it should read, prior findings, constraints and the shape of answer you want; name EVERY skill of its catalog that matches (same-domain skills are complementary) and the MCP server to use when one fits. Past ~20 lines (the 20-line rule), write the brief to a scratch file (e.g. `$OMNIS_HOME/logs/brief_<topic>.md`) and point `request` at it.\n\n")
-	sb.WriteString("If the answer is empty or misses the point, an identical re-call will reproduce it: change the brief, the skill or the agent. After two unhelpful attempts on the same sub-agent, stop calling it — do the work yourself, or answer with what you have and say what is unverified. Never use transfer_to_agent.\n\n")
+	sb.WriteString(blockPart(runtime, "block.subagents", owner, defaultSubAgentRules) + "\n\n")
 
 	for _, cfg := range enabled {
 		desc := cfg.Description

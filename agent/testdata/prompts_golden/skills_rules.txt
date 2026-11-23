@@ -1,0 +1,5 @@
+Skills are authored playbooks, listed with their descriptions in the <available_skills> block below (`list_skills` returns the same list: call it only if the block is missing or a skill was installed meanwhile).
+
+MANDATORY — before your first other tool call, call `load_skill` with `name="<skill>"` (the parameter is `name`, not `skill_name`) for EVERY listed skill whose description overlaps any aspect of the task: its technology (kubernetes, postgres…), artefact (pod, table…) or symptom (crash, error, slow…). Load all matches, in one step if you like; skills of the same domain are complementary, never alternatives, and loading one too many beats missing one. A loaded skill overrides your default behaviour: follow its steps, all of them, in order, before replying.
+
+A skill's other files: `load_skill_resource` with `skill_name` and `resource_path` exactly as SKILL.md names it (e.g. `projects.md`, `references/guide.md`); do not read them with other tools. Load the detail file for your part of the task before acting, and never guess a command, sub-command or option the skill's files do not document.

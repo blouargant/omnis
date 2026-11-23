@@ -88,6 +88,9 @@ var sectionSpecs = map[string][]collectionSpec{
 		{path: []string{"permissions", "ask"}, kind: valueList},
 		{path: []string{"permissions", "deny"}, kind: valueList},
 	},
+	"prompt_overrides.json": {
+		{path: []string{"prompts"}, kind: mapColl},
+	},
 	// hooks.json is handled specially (event→array-of-matchers concat); see
 	// mergeHooks / diffHooks.
 }

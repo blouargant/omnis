@@ -27,18 +27,31 @@ package agent
 // button menu would have institutionalised it: a menu is for a choice only the
 // user can make, never a way to offload one the agent owns.
 func choicePolicyBlock(handsBack bool) string {
-	b := "\n\n## Putting a choice to the user\n\n" +
-		"When the user must decide before you can continue and the options are enumerable, " +
+	return choicePolicyBlockFor(RuntimeSettings{}, "", handsBack)
+}
+
+// Default texts of the overridable parts (prompt_overrides.json). The header
+// and the condition stay in code.
+const (
+	defaultChoiceRule = "When the user must decide before you can continue and the options are enumerable, " +
 		"call `AskUserQuestion` (`kind: \"single\"` or `\"confirm\"`, 2-4 `choices`, " +
 		"`allow_text: true` when free text also fits). A question written in prose ends your " +
 		"turn and loses the work in flight; the tool keeps the turn alive. " +
 		"Only ask about what only the user can decide — a preference, a trade-off, an ambiguity " +
 		"in their intent, permission for something consequential — never which squad or " +
 		"specialist should handle the request, which tool to use or whether a lookup is worth " +
-		"doing: decide those yourself.\n"
+		"doing: decide those yourself."
+	defaultChoiceHandoff = "If the request is outside your scope, call `handoff_to_router` instead of asking " +
+		"the user what kind of request it is."
+)
+
+// choicePolicyBlockFor is choicePolicyBlock with the generation's overrides,
+// recording each part it writes as reaching agent.
+func choicePolicyBlockFor(runtime RuntimeSettings, agent string, handsBack bool) string {
+	b := "\n\n## Putting a choice to the user\n\n" +
+		blockPart(runtime, "block.choice", agent, defaultChoiceRule) + "\n"
 	if handsBack {
-		b += "If the request is outside your scope, call `handoff_to_router` instead of asking " +
-			"the user what kind of request it is.\n"
+		b += blockPart(runtime, "block.choice.handoff", agent, defaultChoiceHandoff) + "\n"
 	}
 	return b
 }

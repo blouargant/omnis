@@ -160,6 +160,12 @@ const routerCollectionCtxNote = "The block below describes the workstream this "
 // content is unit-testable without an ADK context. A hidden session (see
 // SetHiddenSessionResolver) gets the instructions block only, never memory.
 func collectionCtxBlock(sessionID string, forRouter bool) string {
+	return collectionCtxBlockWith(sessionID, forRouter, "")
+}
+
+// collectionCtxBlockWith is collectionCtxBlock with another memory rules text
+// (memory.rules; empty means collmem.Rules). The router's block carries no rules.
+func collectionCtxBlockWith(sessionID string, forRouter bool, rules string) string {
 	store, col := memoryStoreFor(sessionID)
 
 	var instr string
@@ -173,7 +179,7 @@ func collectionCtxBlock(sessionID string, forRouter bool) string {
 		if label == "" {
 			label = "General"
 		}
-		mem = store.Render(col, label, forRouter)
+		mem = store.RenderWith(col, label, forRouter, rules)
 	}
 
 	var parts []string
@@ -199,18 +205,34 @@ func collectionCtxBlock(sessionID string, forRouter bool) string {
 // user-facing session id. With no resolver the session is General under the
 // shared root; an answering root then still gets the memory rules block, while
 // the router gets nothing unless there are instructions or memories.
-func collectionCtxPlugin(name string, forRouter bool) (*plugin.Plugin, error) {
+//
+// rules and reminder are the generation's memory.rules / memory.reminder texts
+// (empty means the defaults).
+func collectionCtxPlugin(name string, forRouter bool, rules, reminder string) (*plugin.Plugin, error) {
+	if reminder == "" {
+		reminder = memoryTurnReminder
+	}
 	return plugin.New(plugin.Config{
 		Name: name,
 		BeforeModelCallback: llmagent.BeforeModelCallback(
 			func(ctx adk.CallbackContext, req *model.LLMRequest) (*model.LLMResponse, error) {
-				return injectCollectionCtx(ctx, req, forRouter)
+				return injectCollectionCtx(ctx, req, forRouter, rules, reminder)
 			},
 		),
 	})
 }
 
-func injectCollectionCtx(ctx adk.CallbackContext, req *model.LLMRequest, forRouter bool) (*model.LLMResponse, error) {
+// memoryRulesFor and memoryReminderText return the generation's memory texts
+// (override or default); memoryRulesFor records that agent receives them.
+func memoryRulesFor(runtime RuntimeSettings, agent string) string {
+	return usePrompt(runtime, "memory.rules", agent, collmem.Rules)
+}
+
+func memoryReminderText(runtime RuntimeSettings) string {
+	return promptText(runtime, "memory.reminder", memoryTurnReminder)
+}
+
+func injectCollectionCtx(ctx adk.CallbackContext, req *model.LLMRequest, forRouter bool, rules, reminder string) (*model.LLMResponse, error) {
 	if req == nil {
 		return nil, nil
 	}
@@ -220,9 +242,9 @@ func injectCollectionCtx(ctx adk.CallbackContext, req *model.LLMRequest, forRout
 		sessionUserWordsStore.record(ctx.SessionID(), req.Contents)
 	}
 	// Reuse the AGENT.md prepend helper (same package) — identical shape.
-	prependAgentMD(req, collectionCtxBlock(ctx.SessionID(), forRouter))
+	prependAgentMD(req, collectionCtxBlockWith(ctx.SessionID(), forRouter, rules))
 	if !forRouter && !sessionHidden(ctx.SessionID()) && !memoryReadOnly(ctx) {
-		appendMemoryReminder(req.Contents)
+		appendTurnReminder(req.Contents, reminder)
 	}
 	return nil, nil
 }

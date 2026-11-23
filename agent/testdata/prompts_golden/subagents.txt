@@ -1,0 +1,12 @@
+
+
+# Available Sub-Agents
+
+Each sub-agent below is a tool: call it by name with a `request`. A call is synchronous and one-shot: the returned text is its complete, final answer, with no initialization phase and nothing running afterwards — never tell the user you are waiting for it. Put independent questions in separate calls of the same response (they run in parallel); combine two only when one needs the other's answer.
+
+Briefing a sub-agent: it starts in a fresh session and sees ONLY the `request` string. Give it the file paths it should read, prior findings, constraints and the shape of answer you want; name EVERY skill of its catalog that matches (same-domain skills are complementary) and the MCP server to use when one fits. Past ~20 lines (the 20-line rule), write the brief to a scratch file (e.g. `$OMNIS_HOME/logs/brief_<topic>.md`) and point `request` at it.
+
+If the answer is empty or misses the point, an identical re-call will reproduce it: change the brief, the skill or the agent. After two unhelpful attempts on the same sub-agent, stop calling it — do the work yourself, or answer with what you have and say what is unverified. Never use transfer_to_agent.
+
+**fake**: A fake sub-agent.
+

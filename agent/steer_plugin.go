@@ -138,14 +138,19 @@ func lastAssistantText(contents []*genai.Content) string {
 // turn mid-flight and that IT — not the sub-agents — decides what to do with each
 // note. Appended to non-router roots when steering is enabled (see
 // buildSquadInstance).
-func steeringAwarenessBlock() string {
-	return "\n\n## Mid-turn steering\n\n" +
-		"A user message beginning \"[The user sent the following while you were working …]\" " +
-		"is the user's latest intent: never ignore it. You decide what it changes; a sub-agent " +
-		"running when it arrived stops and returns to you marked as interrupted, with its partial " +
-		"work, without having seen the note. Then drop or redo its task, re-invoke it with the " +
-		"note folded in (pass its `session` handle as `resume_session` to continue it), handle " +
-		"the note yourself, or re-invoke it to finish if the note does not concern it.\n"
+func steeringAwarenessBlock() string { return steeringAwarenessBlockFor(RuntimeSettings{}, "") }
+
+const defaultSteeringRule = "A user message beginning \"[The user sent the following while you were working …]\" " +
+	"is the user's latest intent: never ignore it. You decide what it changes; a sub-agent " +
+	"running when it arrived stops and returns to you marked as interrupted, with its partial " +
+	"work, without having seen the note. Then drop or redo its task, re-invoke it with the " +
+	"note folded in (pass its `session` handle as `resume_session` to continue it), handle " +
+	"the note yourself, or re-invoke it to finish if the note does not concern it."
+
+// steeringAwarenessBlockFor is steeringAwarenessBlock with the overrides
+// (block.steering).
+func steeringAwarenessBlockFor(runtime RuntimeSettings, agent string) string {
+	return "\n\n## Mid-turn steering\n\n" + blockPart(runtime, "block.steering", agent, defaultSteeringRule) + "\n"
 }
 
 // injectSteering appends the steering notes to req as a user message so the model

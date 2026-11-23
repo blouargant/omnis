@@ -301,6 +301,7 @@ func newEngine(d serverDeps) *gin.Engine {
 	// GET /api/whoami — the user this instance serves + whether the identity
 	// header is enforced. Shown in the web UI sidebar footer.
 	auth.GET("/whoami", handleWhoami(d))
+	auth.GET("/prompts", handlePrompts(d))
 	// POST /api/terminal/token — mint a short-lived, single-use token for the
 	// terminal WebSocket. Behind authMiddleware (needs the master bearer token in
 	// the Authorization header), so only an already-authenticated client can get

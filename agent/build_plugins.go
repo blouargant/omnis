@@ -168,7 +168,13 @@ func buildPlugins(
 	// read it as subject matter for the routing decision, never as instructions to
 	// act on (routerCollectionCtxNote). Prepended after AGENT.md so the broad
 	// workstream framing sits outermost, project specifics next.
-	if col, err := collectionCtxPlugin("collection_ctx", isRouterSquad); err == nil {
+	var memRules, memReminder string
+	if !isRouterSquad {
+		memRules = memoryRulesFor(runtime, rootCfg.Name)
+		memReminder = memoryReminderText(runtime)
+		runtime.reach.add("memory.reminder", rootCfg.Name)
+	}
+	if col, err := collectionCtxPlugin("collection_ctx", isRouterSquad, memRules, memReminder); err == nil {
 		plugins = append(plugins, col)
 	}
 	// The root agent's own per-message reminder (agent.json turn_reminder).

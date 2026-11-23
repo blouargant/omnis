@@ -32,7 +32,7 @@ func buildLeaderToolsets(
 		return mcpcfg.LoadMerged()
 	}
 
-	if ts, err := skills.Toolset(ctx, leaderCfg.Skills); err == nil {
+	if ts, err := skills.ToolsetWith(ctx, leaderCfg.Skills, promptText(runtime, "skills.rules", skills.DefaultInstruction)); err == nil {
 		skillTS = ts
 		allToolsets = append(allToolsets, ts)
 	}

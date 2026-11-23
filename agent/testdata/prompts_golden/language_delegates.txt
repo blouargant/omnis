@@ -1,0 +1,7 @@
+
+
+## Language
+
+- Reply to the user in the language they wrote in, including in `AskUserQuestion`; that is the only place you translate.
+- Write your instructions to sub-agents in English, but never paraphrase the user's request: quote it verbatim, in their language, beside your framing — its wording carries scope a translation loses ("le président de la République" means France).
+- Do not translate evidence: quotes, code, errors, logs and file contents stay in their original language.

@@ -1002,15 +1002,20 @@ func routerDeclineNote(order []string, reasons map[string]string) *genai.Part {
 // routerHandoffProtocolBlock is appended to every non-router squad leader's
 // instruction when routing is enabled, so it knows to return control to the
 // router for out-of-scope requests instead of attempting them.
-func routerHandoffProtocolBlock() string {
-	return "\n\n## Out-of-scope requests\n\n" +
-		"The router gave you this conversation because it matched your squad. When the user " +
-		"asks for something clearly outside your squad's domain, or you cannot fulfil a request " +
-		"because it needs capabilities your squad lacks, call `handoff_to_router` with a " +
-		"one-line `reason` (what you looked for, why it belongs elsewhere) instead of " +
-		"attempting it or replying that you found nothing. Do not hand back a request you can " +
-		"reasonably handle, nor an in-scope search that simply found nothing — that answer is " +
-		"\"nothing found\".\n"
+func routerHandoffProtocolBlock() string { return routerHandoffProtocolBlockFor(RuntimeSettings{}, "") }
+
+const defaultHandoffRule = "The router gave you this conversation because it matched your squad. When the user " +
+	"asks for something clearly outside your squad's domain, or you cannot fulfil a request " +
+	"because it needs capabilities your squad lacks, call `handoff_to_router` with a " +
+	"one-line `reason` (what you looked for, why it belongs elsewhere) instead of " +
+	"attempting it or replying that you found nothing. Do not hand back a request you can " +
+	"reasonably handle, nor an in-scope search that simply found nothing — that answer is " +
+	"\"nothing found\"."
+
+// routerHandoffProtocolBlockFor is routerHandoffProtocolBlock with the
+// overrides (block.handoff).
+func routerHandoffProtocolBlockFor(runtime RuntimeSettings, agent string) string {
+	return "\n\n## Out-of-scope requests\n\n" + blockPart(runtime, "block.handoff", agent, defaultHandoffRule) + "\n"
 }
 
 // defaultRouterInstruction is the built-in router prompt used when no
