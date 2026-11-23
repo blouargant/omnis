@@ -1923,6 +1923,29 @@ sub-agents dominate and vary 2-3×). Report:
 `web/docs` does not document the single-model override, so the Helper answers
 that no such setting exists.
 
+### Per-message reminder (`turn_reminder`)
+
+An agent's `agent.json` may set **`turn_reminder`**: a short note appended, as a
+late part, to every typed user message of the requests it makes **as a squad
+root** ([agent/turn_reminder.go](agent/turn_reminder.go) `appendTurnReminder`,
+plugin `turn_reminder` in `buildPlugins`, non-router roots only; sub-agents
+ignore it). Same placement rules as the memory reminder, which now shares the
+helper: never on a tool result or the compression summary, on every message so
+the request stays a stable prefix for the prompt cache, idempotent, the user's
+words stay the first part. Round-trips through the Settings GET/PUT allowlist
+(`TestParsedAgentRoundTripKeepsTurnReminder`); not in the Settings form nor
+`set_agent` yet.
+
+**Why:** the System leader's delegation rules, whatever their wording in the
+system instruction, did not reach `balanced` (0/20 unprompted delegation, no
+fan-out). With the shipped reminder on `leader` (investigator first, one call
+per independent question in the same response, one re-task then stop):
+unprompted delegation 0/5 → 5/5, fan-out 0/5 → 5/5 in parallel, calls on empty
+evidence 4-5 → 2-3; `premium` unchanged, 15/15
+(`omnis-benches/reports/leader-fake-2026-11.md`, fourth run). `balanced` still
+runs its own Bash alongside the delegation. Re-run that bench
+(`squad-bench/tasks-leader-fake.json`) before rewording it.
+
 ### Deferred tools (`deferred_tools`) and the fixed prompt
 
 Every declared tool's schema, and the whole system instruction, are re-sent on
